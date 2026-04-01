@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  --color-on-primary-fixed-variant: #574500;
+  --color-surface-bright: #38393e;
+  --color-secondary-container: #474742;
+  --color-surface-dim: #121317;
+  --color-on-secondary-fixed-variant: #474742;
+  --color-outline: #919095;
+  --color-on-surface: #e3e2e8;
+  --color-on-error-container: #ffdad6;
+  --color-on-secondary-fixed: #1c1c18;
+  --color-primary-fixed: #ffe088;
+  --color-on-tertiary-fixed-variant: #891d12;
+  --color-tertiary-container: #240000;
+  --color-on-primary-container: #957700;
+  --color-surface-container-lowest: #0d0e12;
+  --color-on-tertiary-fixed: #410000;
+  --color-surface-tint: #e9c349;
+  --color-secondary: #c9c6c0;
+  --color-on-primary: #3c2f00;
+  --color-on-secondary-container: #b7b5af;
+  --color-surface-container-low: #1a1b20;
+  --color-surface-container: #1f1f24;
+  --color-surface-variant: #343439;
+  --color-on-background: #e3e2e8;
+  --color-background: #121317;
+  --color-error-container: #93000a;
+  --color-surface-container-high: #292a2e;
+  --color-on-surface-variant: #c7c6cb;
+  --color-on-tertiary: #680201;
+  --color-on-error: #690005;
+  --color-tertiary-fixed-dim: #ffb4a8;
+  --color-on-secondary: #31312c;
+  --color-primary-container: #110b00;
+  --color-surface-container-highest: #343439;
+  --color-primary: #e9c349;
+  --color-inverse-surface: #e3e2e8;
+  --color-primary-fixed-dim: #e9c349;
+  --color-tertiary: #ffb4a8;
+  --color-secondary-fixed-dim: #c9c6c0;
+  --color-on-primary-fixed: #241a00;
+  --color-inverse-on-surface: #2f3035;
+  --color-tertiary-fixed: #ffdad4;
+  --color-inverse-primary: #735c00;
+  --color-secondary-fixed: #e5e2db;
+  --color-surface: #121317;
+  --color-error: #ffb4ab;
+  --color-outline-variant: #46464b;
+  --color-on-tertiary-container: #d0503f;
+
+  --font-headline: "Noto Serif";
+  --font-body: Inter;
+  --font-label: Inter;
+  
+  --radius-DEFAULT: 0.125rem;
+}
+
+@layer utilities {
+    .vellum-grain {
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+        opacity: 0.02;
+    }
+    .letterpress {
+        text-shadow: 0px 1px 1px rgba(0,0,0,0.8), 0px -1px 0px rgba(255,255,255,0.05);
+    }
+}

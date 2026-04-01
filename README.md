@@ -4,6 +4,8 @@
 
 A replicable RAG-based framework for creating AI chatbot personas of historical scholars and figures, strictly grounded in their primary source texts. Every response cites specific pages and sources — no hallucination, no fabrication.
 
+**Created by Anggi Azzuhri**
+
 Built with Python · ChromaDB · Gemini/Claude · FastAPI · Telegram
 
 ---

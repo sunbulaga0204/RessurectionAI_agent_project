@@ -10,13 +10,18 @@ let personaData = null;
 // ── DOM Elements ────────────────────────────────────────
 
 const chatArea = document.getElementById('chat-area');
+const chatScroller = document.getElementById('chat-scroller');
 const userInput = document.getElementById('user-input');
 const btnSend = document.getElementById('btn-send');
 const btnAbout = document.getElementById('btn-about');
 const btnExport = document.getElementById('btn-export');
+const btnExportSidebar = document.getElementById('btn-export-sidebar');
 const btnNewSession = document.getElementById('btn-new-session');
 const aboutPanel = document.getElementById('about-panel');
 const btnCloseAbout = document.getElementById('btn-close-about');
+const btnMobileMenu = document.getElementById('btn-mobile-menu');
+const sidebar = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebar-overlay');
 
 // ── Initialize ──────────────────────────────────────────
 
@@ -53,19 +58,44 @@ function renderWelcome() {
     ];
 
     const suggestionsHtml = suggestions.map(s =>
-        `<button class="suggestion-chip" onclick="sendSuggestion('${s.replace(/'/g, "\\'")}')">${s}</button>`
+        `<button class="bg-surface-container-low hover:bg-surface-container-high text-secondary hover:text-primary border border-outline-variant/20 px-4 py-2 rounded-full text-xs font-medium transition-all flex items-center gap-2" onclick="sendSuggestion('${s.replace(/'/g, "\\'")}')"><span class="text-primary/60">💡</span> ${escapeHtml(s)}</button>`
     ).join('');
 
     chatArea.innerHTML = `
-        <div class="welcome-card">
-            <div class="welcome-icon">🎭</div>
-            <h2 class="welcome-title">${escapeHtml(name)}</h2>
-            <p class="welcome-greeting">"${escapeHtml(greeting)}"</p>
-            <div class="welcome-suggestions">
-                ${suggestionsHtml}
+        <div class="relative group welcome-card mt-12 mb-24">
+            <div class="absolute -left-12 top-4 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary border border-primary/20 hidden md:flex">
+                <span class="material-symbols-outlined text-base" data-icon="history_edu">history_edu</span>
+            </div>
+            <div class="bg-surface-container-highest/20 rounded-3xl p-8 relative overflow-hidden backdrop-blur-sm border border-outline-variant/5 text-center">
+                <div class="vellum-grain absolute inset-0 pointer-events-none"></div>
+                <h2 class="font-headline text-3xl leading-relaxed text-primary letterpress mb-4">${escapeHtml(name)}</h2>
+                <div class="font-headline text-xl leading-relaxed text-on-surface mb-8 italic">
+                    "${escapeHtml(greeting)}"
+                </div>
+                <div class="flex flex-wrap gap-2 justify-center mt-6 border-t border-outline-variant/10 pt-6">
+                    ${suggestionsHtml}
+                </div>
             </div>
         </div>
     `;
+}
+
+// ── Mobile Sidebar ──────────────────────────────────────
+
+function toggleMenu() {
+    const isClosed = sidebar.classList.contains('-translate-x-full');
+    if (isClosed) {
+        sidebar.classList.remove('-translate-x-full');
+        sidebarOverlay.classList.remove('hidden');
+    } else {
+        sidebar.classList.add('-translate-x-full');
+        sidebarOverlay.classList.add('hidden');
+    }
+}
+
+if (btnMobileMenu && sidebar && sidebarOverlay) {
+    btnMobileMenu.addEventListener('click', toggleMenu);
+    sidebarOverlay.addEventListener('click', toggleMenu);
 }
 
 // ── About Panel ─────────────────────────────────────────
@@ -84,8 +114,8 @@ function renderAbout() {
     const works = personaData.major_works || [];
     if (works.length > 0) {
         worksEl.innerHTML = `
-            <h3>Major Works</h3>
-            <ul>${works.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
+            <h3 class="text-primary text-sm uppercase tracking-widest mb-2 font-bold">Major Works</h3>
+            <ul class="list-disc list-inside text-sm text-secondary space-y-1">${works.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
         `;
     } else {
         worksEl.innerHTML = '';
@@ -94,13 +124,13 @@ function renderAbout() {
     document.getElementById('about-disclaimer').textContent =
         personaData.disclaimer || '';
 
-    aboutPanel.classList.add('visible');
+    aboutPanel.classList.remove('opacity-0', 'pointer-events-none');
 }
 
 btnAbout.addEventListener('click', renderAbout);
-btnCloseAbout.addEventListener('click', () => aboutPanel.classList.remove('visible'));
+btnCloseAbout.addEventListener('click', () => aboutPanel.classList.add('opacity-0', 'pointer-events-none'));
 aboutPanel.addEventListener('click', (e) => {
-    if (e.target === aboutPanel) aboutPanel.classList.remove('visible');
+    if (e.target === aboutPanel) aboutPanel.classList.add('opacity-0', 'pointer-events-none');
 });
 
 // ── Chat Logic ──────────────────────────────────────────
@@ -150,63 +180,82 @@ function sendSuggestion(text) {
 }
 
 function appendMessage(role, text) {
-    const icon = role === 'user' ? '👤' : '🎭';
     const div = document.createElement('div');
-    div.className = `message ${role}`;
-    div.innerHTML = `
-        <div class="message-avatar">${icon}</div>
-        <div class="message-body">
-            <div class="message-text">${escapeHtml(text)}</div>
-        </div>
-    `;
+    if (role === 'user') {
+        div.className = "flex justify-end w-full";
+        div.innerHTML = `
+            <div class="max-w-[85%] bg-surface-container-high/40 border border-outline-variant/10 px-6 py-4 rounded-2xl backdrop-blur-md">
+                <p class="text-on-surface-variant font-light leading-relaxed">${escapeHtml(text)}</p>
+            </div>
+        `;
+    } else {
+        // Simple error or fallback
+        div.innerHTML = `<div class="text-error bg-error-container/20 p-4 rounded-xl text-center text-sm">${escapeHtml(text)}</div>`;
+    }
     chatArea.appendChild(div);
     scrollToBottom();
 }
 
 function appendAssistantMessage(data) {
     const div = document.createElement('div');
-    div.className = 'message assistant';
+    div.className = 'relative group mb-8';
 
-    let bodyHtml = `<div class="message-text">${escapeHtml(data.answer_text || '')}</div>`;
-
-    // Citations
+    // The answer text broken into paragraphs
+    const paragraphs = (data.answer_text || '').split('\n').filter(p => p.trim() !== '');
+    
+    // Process citations
     const citations = data.citations || [];
-    if (citations.length > 0) {
-        let citHtml = '<div class="citations">';
-        citations.forEach((c, i) => {
-            const ref = [c.book, c.chapter].filter(Boolean).join(', ');
-            const page = c.page_number ? `p. ${c.page_number}` : '';
-            const quote = c.quote || '';
+    let processedText = '';
+    
+    // We will weave citations into the text or append them at the end.
+    // For simplicity, we just format the response as a manuscript block and attach hover-cards for all citations if they exist.
+    
+    const citationCardsHTML = citations.map((c, i) => {
+        const ref = [c.book, c.chapter].filter(Boolean).join(', ');
+        const page = c.page_number ? `p. ${c.page_number}` : '';
+        const quote = c.quote || '';
+        
+        return `
+            <div class="mt-4 p-4 bg-surface-container-highest/50 border border-primary/20 rounded-xl">
+                <span class="block text-[0.6rem] uppercase tracking-widest text-primary font-bold mb-1">Primary Source [${i+1}]</span>
+                <span class="block text-sm italic font-headline leading-snug text-secondary-fixed">"${escapeHtml(quote)}"</span>
+                <span class="block text-[0.6rem] text-primary/60 mt-2 text-right">${escapeHtml(ref)} ${page}</span>
+            </div>
+        `;
+    }).join('');
 
-            citHtml += `
-                <div class="citation-card" onclick="this.classList.toggle('expanded')">
-                    <div class="citation-header">
-                        <span class="citation-badge">${i + 1}</span>
-                        <span class="citation-ref">${escapeHtml(ref)}</span>
-                        ${page ? `<span class="citation-page">📄 ${escapeHtml(page)}</span>` : ''}
-                    </div>
-                    ${quote ? `<div class="citation-quote">"${escapeHtml(quote)}"</div>` : ''}
-                </div>
-            `;
-        });
-        citHtml += '</div>';
-        bodyHtml += citHtml;
-    }
+    let textHtml = paragraphs.map(p => `<p class="mb-4">${escapeHtml(p)}</p>`).join('');
 
-    // Follow-up
+    let followUpHtml = '';
     if (data.follow_up) {
-        bodyHtml += `<div class="follow-up">💡 ${escapeHtml(data.follow_up)}</div>`;
-    }
-
-    // Closing
-    if (data.closing) {
-        bodyHtml += `<div class="message-text" style="font-style:italic; opacity:0.7; padding:8px 18px; font-size:0.85rem;">${escapeHtml(data.closing)}</div>`;
+        followUpHtml = `
+            <div class="mt-8 pt-6 border-t border-outline-variant/10">
+                <p class="text-sm text-primary mb-3">💡 Suggestion:</p>
+                <button class="bg-surface-container border border-outline-variant/20 px-4 py-2 rounded-xl text-xs font-medium hover:bg-surface-container-high text-secondary transition-all" onclick="sendSuggestion('${data.follow_up.replace(/'/g, "\\'")}')">
+                    ${escapeHtml(data.follow_up)}
+                </button>
+            </div>
+        `;
     }
 
     div.innerHTML = `
-        <div class="message-avatar">🎭</div>
-        <div class="message-body">${bodyHtml}</div>
+        <div class="absolute -left-12 top-4 w-8 h-8 rounded-full bg-primary/10 items-center justify-center text-primary border border-primary/20 hidden md:flex">
+            <span class="material-symbols-outlined text-base" data-icon="history_edu">history_edu</span>
+        </div>
+        <div class="bg-surface-container-highest/20 rounded-3xl p-6 md:p-8 relative overflow-hidden backdrop-blur-sm border border-outline-variant/5">
+            <div class="vellum-grain absolute inset-0 pointer-events-none"></div>
+            <div class="font-headline text-lg md:text-xl leading-relaxed text-on-surface letterpress mb-6">
+               ${textHtml}
+            </div>
+            
+            ${citations.length > 0 ? `<div class="mt-6 border-t border-outline-variant/10 pt-4"><p class="text-xs uppercase tracking-widest text-secondary/60 mb-2 font-bold">Documented References</p>${citationCardsHTML}</div>` : ''}
+            
+            ${followUpHtml}
+            
+            ${data.closing ? `<div class="mt-4 text-xs italic text-secondary/50 text-right">${escapeHtml(data.closing)}</div>` : ''}
+        </div>
     `;
+    
     chatArea.appendChild(div);
     scrollToBottom();
 }
@@ -215,14 +264,18 @@ function appendAssistantMessage(data) {
 
 function showTyping() {
     const div = document.createElement('div');
-    div.className = 'typing-indicator';
+    div.className = 'relative group opacity-50 mb-8';
     div.id = 'typing';
     div.innerHTML = `
-        <div class="message-avatar" style="background:var(--accent-gold-dim);border:1px solid var(--accent-gold);width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;">🎭</div>
-        <div class="typing-dots">
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
+        <div class="absolute -left-12 top-4 w-8 h-8 rounded-full bg-surface-container-highest/50 items-center justify-center text-secondary border border-outline-variant/10 hidden md:flex">
+            <span class="material-symbols-outlined text-base animate-pulse" data-icon="auto_stories">auto_stories</span>
+        </div>
+        <div class="bg-surface-container-low border border-dashed border-outline-variant/20 rounded-3xl p-6 md:p-8">
+            <div class="flex gap-2">
+                <div class="w-2 h-2 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.3s]"></div>
+                <div class="w-2 h-2 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.15s]"></div>
+                <div class="w-2 h-2 rounded-full bg-primary/40 animate-bounce"></div>
+            </div>
         </div>
     `;
     chatArea.appendChild(div);
@@ -236,7 +289,7 @@ function hideTyping() {
 
 // ── Export ───────────────────────────────────────────────
 
-btnExport.addEventListener('click', async () => {
+async function handleExport() {
     if (!sessionId) {
         alert('No conversation to export yet.');
         return;
@@ -250,8 +303,6 @@ btnExport.addEventListener('click', async () => {
         });
 
         const text = await res.text();
-
-        // Trigger download
         const blob = new Blob([text], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -259,18 +310,24 @@ btnExport.addEventListener('click', async () => {
         a.download = `conversation_${sessionId}.md`;
         a.click();
         URL.revokeObjectURL(url);
-
     } catch (e) {
         console.error('Export error:', e);
         alert('Failed to export conversation.');
     }
-});
+}
+
+if (btnExport) btnExport.addEventListener('click', handleExport);
+if (btnExportSidebar) btnExportSidebar.addEventListener('click', handleExport);
 
 // ── New Session ─────────────────────────────────────────
 
 btnNewSession.addEventListener('click', () => {
     sessionId = null;
+    chatArea.innerHTML = '';
     renderWelcome();
+    if (window.innerWidth < 768) {
+        toggleMenu(); // close mobile menu when choosing new session
+    }
 });
 
 // ── Input Handling ──────────────────────────────────────
@@ -280,7 +337,10 @@ function autoResize() {
     userInput.style.height = Math.min(userInput.scrollHeight, 120) + 'px';
 }
 
-userInput.addEventListener('input', autoResize);
+userInput.addEventListener('input', () => {
+    autoResize();
+    btnSend.disabled = userInput.value.trim().length === 0;
+});
 
 userInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -295,7 +355,17 @@ btnSend.addEventListener('click', () => sendMessage(userInput.value));
 
 function scrollToBottom() {
     requestAnimationFrame(() => {
-        chatArea.scrollTop = chatArea.scrollHeight;
+        if (chatScroller) {
+            chatScroller.scrollTo({
+                top: chatScroller.scrollHeight,
+                behavior: 'smooth'
+            });    
+        } else {
+            window.scrollTo({
+                top: document.body.scrollHeight,
+                behavior: 'smooth'
+            });
+        }
     });
 }
 

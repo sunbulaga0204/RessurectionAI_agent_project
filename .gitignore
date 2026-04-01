@@ -31,3 +31,4 @@ Thumbs.db
 
 # Raw source files (large, keep only JSON)
 sources/raw/*.txt
+bin/
