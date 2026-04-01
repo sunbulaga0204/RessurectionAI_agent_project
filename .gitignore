@@ -1,0 +1,33 @@
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# ChromaDB persistent storage
+chroma_db/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Raw source files (large, keep only JSON)
+sources/raw/*.txt

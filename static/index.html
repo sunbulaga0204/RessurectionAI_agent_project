@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Resurrection Agent — Converse with historical figures through their documented works using AI-powered research assistance.">
+    <title>Resurrection Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app" id="app">
+        <!-- Header -->
+        <header class="header" id="header">
+            <div class="header-persona">
+                <div class="avatar" id="avatar">
+                    <span class="avatar-icon">🎭</span>
+                </div>
+                <div class="header-info">
+                    <h1 class="persona-name" id="persona-name">Loading...</h1>
+                    <p class="persona-era" id="persona-era"></p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn-icon" id="btn-about" title="About this persona" aria-label="About">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                </button>
+                <button class="btn-icon" id="btn-export" title="Download conversation" aria-label="Export chat">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </button>
+                <button class="btn-icon" id="btn-new-session" title="New session" aria-label="New session">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- About Panel (hidden by default) -->
+        <div class="about-panel" id="about-panel">
+            <div class="about-content">
+                <h2 id="about-name"></h2>
+                <p class="about-meta" id="about-meta"></p>
+                <p class="about-bio" id="about-bio"></p>
+                <div class="about-works" id="about-works"></div>
+                <p class="about-disclaimer" id="about-disclaimer"></p>
+                <button class="btn-close-about" id="btn-close-about">Close</button>
+            </div>
+        </div>
+
+        <!-- Chat Area -->
+        <main class="chat-area" id="chat-area">
+            <!-- Welcome message injected by JS -->
+        </main>
+
+        <!-- Input Area -->
+        <footer class="input-area">
+            <div class="input-wrapper">
+                <textarea
+                    id="user-input"
+                    placeholder="Ask a question about their works..."
+                    rows="1"
+                    aria-label="Type your question"
+                ></textarea>
+                <button class="btn-send" id="btn-send" title="Send" aria-label="Send message">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+            </div>
+            <p class="input-disclaimer">AI reconstruction for research purposes. Always verify with primary sources.</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

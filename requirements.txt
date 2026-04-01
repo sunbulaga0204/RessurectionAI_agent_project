@@ -1,0 +1,8 @@
+google-genai
+anthropic
+python-telegram-bot[ext]
+python-dotenv
+chromadb
+fastapi
+uvicorn[standard]
+pydantic
