@@ -191,6 +191,8 @@ def generate_answer(query: str, retrieved_chunks: list[dict],
 
         # Ensure required fields
         result.setdefault("can_answer", False)
+        result.setdefault("answer_mode", "elaborated")
+        result.setdefault("quote_primary", "")
         result.setdefault("answer_text", "")
         result.setdefault("citations", [])
         result.setdefault("follow_up", "")

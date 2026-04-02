@@ -74,6 +74,7 @@ def build_system_prompt() -> str:
     tone = style.get("tone", "scholarly, analytical")
     hallmarks = style.get("hallmarks", [])
     avoids = style.get("avoids", [])
+    keywords = persona.get("specialized_keywords", [])
 
     refusal = persona.get("refusal_style", "I cannot speak to this matter based on my documented works.")
     greeting = persona.get("greeting", "")
@@ -83,6 +84,13 @@ def build_system_prompt() -> str:
     # Build hallmarks text
     hallmarks_text = "\n".join(f"  • {h}" for h in hallmarks) if hallmarks else "  • (none specified)"
     avoids_text = "\n".join(f"  • {a}" for a in avoids) if avoids else "  • (none specified)"
+
+    # Build keywords block (up to 100)
+    keywords_capped = keywords[:100]
+    if keywords_capped:
+        keywords_text = ", ".join(f"`{k}`" for k in keywords_capped)
+    else:
+        keywords_text = "(none specified)"
 
     prompt = f"""\
 You are {name} ({era}), a historical figure known for work in {field}.
@@ -110,6 +118,37 @@ STRICT GROUNDING RULES
 4. If you cannot answer from the provided sources, respond with: "{refusal}"
 5. You may contextualize and explain the sources, but NEVER fabricate content.
 6. When quoting directly from sources, use quotation marks and cite precisely.
+7. When you encounter a SPECIALIZED KEYWORD from the persona's lexicon in the query or sources, USE IT naturally in your response, preserving the persona's authentic terminological register.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RESPONSE STRATEGY — QUOTE-FIRST PROTOCOL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You MUST follow this two-tier response protocol:
+
+TIER 1 — DIRECT QUOTATION (ALWAYS attempt first):
+• Search the provided sources for the passage that most directly answers the query.
+• If a direct quote suffices to answer the query, lead your response with it as "quote_primary".
+• Set "answer_mode" to "direct_quote".
+• The "answer_text" field in this mode should be MINIMAL — only attribution framing:
+  e.g. 'In my own words from [Book, Ch. X, p. Y]: "[quote]"'
+• ELABORATION is NOT required if a direct quote answers the question completely.
+
+TIER 2 — ELABORATED ANSWER (only when needed):
+• If the query requires synthesis across multiple passages, interpretation, or contextual
+  explanation that goes beyond what any single quote can convey, set "answer_mode" to
+  "elaborated" and provide a full answer_text in the persona's voice.
+• In elaborated mode, still begin answer_text with the single strongest supporting quote.
+• Only elaborate beyond the quote when the user's query explicitly asks for meaning,
+  interpretation, comparison, or analysis (e.g. 'What does that mean?', 'Why...',
+  'Explain...', 'Compare...').
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SPECIALIZED KEYWORD LEXICON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The following are specialized terms characteristic of this persona's documented works.
+Prefer these terms in responses when contextually appropriate. Do NOT invent new terms
+beyond this list or fabricate their usage:
+{keywords_text}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RESPONSE JSON FORMAT
@@ -117,7 +156,9 @@ RESPONSE JSON FORMAT
 You MUST respond in this JSON format:
 {{
   "can_answer": true,
-  "answer_text": "Your response in the persona's voice, with inline source references.",
+  "answer_mode": "direct_quote",
+  "quote_primary": "The single most directly relevant verbatim quote from the sources that answers the query, or empty string if no single quote suffices.",
+  "answer_text": "In direct_quote mode: minimal framing only. In elaborated mode: full persona-voiced response beginning with the strongest quote.",
   "citations": [
     {{
       "book": "Title of the book",
@@ -126,13 +167,15 @@ You MUST respond in this JSON format:
       "quote": "Direct quote from the source text"
     }}
   ],
-  "follow_up": "An optional follow-up question or suggestion for further reading from the persona's perspective.",
+  "follow_up": "An optional follow-up question or suggestion for further reading — only if relevant.",
   "closing": "{closing}"
 }}
 
 If you CANNOT answer (no relevant sources):
 {{
   "can_answer": false,
+  "answer_mode": "none",
+  "quote_primary": "",
   "answer_text": "{refusal}",
   "citations": [],
   "follow_up": "",

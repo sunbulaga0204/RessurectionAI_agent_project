@@ -200,37 +200,61 @@ function appendAssistantMessage(data) {
     const div = document.createElement('div');
     div.className = 'relative group mb-8';
 
-    // The answer text broken into paragraphs
-    const paragraphs = (data.answer_text || '').split('\n').filter(p => p.trim() !== '');
-    
-    // Process citations
+    const answerMode = data.answer_mode || 'elaborated';
+    const quotePrimary = data.quote_primary || '';
     const citations = data.citations || [];
-    let processedText = '';
-    
-    // We will weave citations into the text or append them at the end.
-    // For simplicity, we just format the response as a manuscript block and attach hover-cards for all citations if they exist.
-    
+
+    // ── Quote-primary block (always shown if present) ──
+    let quoteBlockHtml = '';
+    if (quotePrimary) {
+        // Find first citation source label for attribution
+        const firstCit = citations[0];
+        const attribution = firstCit
+            ? `${firstCit.book || ''}${firstCit.chapter ? ', ' + firstCit.chapter : ''}${firstCit.page_number ? ', p. ' + firstCit.page_number : ''}`
+            : '';
+
+        quoteBlockHtml = `
+            <div class="font-headline text-xl md:text-2xl leading-relaxed text-on-surface letterpress mb-6 border-l-4 border-primary/60 pl-6 py-2 italic">
+                "${escapeHtml(quotePrimary)}"
+                ${attribution ? `<span class="block text-xs not-italic text-primary/70 mt-2 font-body tracking-widest uppercase">${escapeHtml(attribution)}</span>` : ''}
+            </div>
+        `;
+    }
+
+    // ── Answer text (framing in direct_quote mode, full prose in elaborated mode) ──
+    let answerHtml = '';
+    if (answerMode === 'elaborated' || !quotePrimary) {
+        // Elaborated: render full answer_text as prose paragraphs
+        const paragraphs = (data.answer_text || '').split('\n').filter(p => p.trim() !== '');
+        if (paragraphs.length > 0) {
+            answerHtml = `<div class="space-y-4 font-body text-secondary leading-relaxed opacity-90 mb-6">${paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('')}</div>`;
+        }
+    } else if (answerMode === 'direct_quote' && data.answer_text && data.answer_text.trim()) {
+        // Direct-quote framing text (e.g. attribution sentence): subtle, below the pull-quote
+        answerHtml = `<p class="text-xs text-secondary/60 font-body italic mb-4">${escapeHtml(data.answer_text)}</p>`;
+    }
+
+    // ── Citation cards ──
     const citationCardsHTML = citations.map((c, i) => {
         const ref = [c.book, c.chapter].filter(Boolean).join(', ');
         const page = c.page_number ? `p. ${c.page_number}` : '';
         const quote = c.quote || '';
-        
+
         return `
             <div class="mt-4 p-4 bg-surface-container-highest/50 border border-primary/20 rounded-xl">
                 <span class="block text-[0.6rem] uppercase tracking-widest text-primary font-bold mb-1">Primary Source [${i+1}]</span>
-                <span class="block text-sm italic font-headline leading-snug text-secondary-fixed">"${escapeHtml(quote)}"</span>
+                ${quote ? `<span class="block text-sm italic font-headline leading-snug text-secondary-fixed">"${escapeHtml(quote)}"</span>` : ''}
                 <span class="block text-[0.6rem] text-primary/60 mt-2 text-right">${escapeHtml(ref)} ${page}</span>
             </div>
         `;
     }).join('');
 
-    let textHtml = paragraphs.map(p => `<p class="mb-4">${escapeHtml(p)}</p>`).join('');
-
+    // ── Follow-up chip ──
     let followUpHtml = '';
     if (data.follow_up) {
         followUpHtml = `
             <div class="mt-8 pt-6 border-t border-outline-variant/10">
-                <p class="text-sm text-primary mb-3">💡 Suggestion:</p>
+                <p class="text-sm text-primary mb-3">💡 Explore further:</p>
                 <button class="bg-surface-container border border-outline-variant/20 px-4 py-2 rounded-xl text-xs font-medium hover:bg-surface-container-high text-secondary transition-all" onclick="sendSuggestion('${data.follow_up.replace(/'/g, "\\'")}')">
                     ${escapeHtml(data.follow_up)}
                 </button>
@@ -244,18 +268,14 @@ function appendAssistantMessage(data) {
         </div>
         <div class="bg-surface-container-highest/20 rounded-3xl p-6 md:p-8 relative overflow-hidden backdrop-blur-sm border border-outline-variant/5">
             <div class="vellum-grain absolute inset-0 pointer-events-none"></div>
-            <div class="font-headline text-lg md:text-xl leading-relaxed text-on-surface letterpress mb-6">
-               ${textHtml}
-            </div>
-            
-            ${citations.length > 0 ? `<div class="mt-6 border-t border-outline-variant/10 pt-4"><p class="text-xs uppercase tracking-widest text-secondary/60 mb-2 font-bold">Documented References</p>${citationCardsHTML}</div>` : ''}
-            
+            ${quoteBlockHtml}
+            ${answerHtml}
+            ${citations.length > 0 ? `<div class="border-t border-outline-variant/10 pt-4"><p class="text-xs uppercase tracking-widest text-secondary/60 mb-2 font-bold">Documented References</p>${citationCardsHTML}</div>` : ''}
             ${followUpHtml}
-            
             ${data.closing ? `<div class="mt-4 text-xs italic text-secondary/50 text-right">${escapeHtml(data.closing)}</div>` : ''}
         </div>
     `;
-    
+
     chatArea.appendChild(div);
     scrollToBottom();
 }
