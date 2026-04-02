@@ -122,14 +122,10 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env: add GEMINI_API_KEY (required), optionally ANTHROPIC_API_KEY and TELEGRAM_BOT_TOKEN
 
-# 3. Prepare sources
-# Option A: Convert TXT files with page markers
-python txt_to_json.py --input sources/raw/ --output sources/
-
-# Option B: Place JSON files directly in sources/
-
-# 4. Ingest sources (one-time)
-python ingest.py
+# 3. Prepare & Ingest sources [REDACTED FOR PUBLIC REPO]
+# The system integrates primary source datasets by chunking and embedding
+# the texts into the vector store (ChromaDB) for retrieval.
+# <database_commands_censored>
 
 # 5. Start the agent
 python main.py                  # Web UI only (http://localhost:8000)
@@ -186,13 +182,9 @@ Add notes from biographers and scholars about the figure's rhetorical style:
 
 ### Step 3: Prepare and Ingest Sources
 
-```bash
-# Convert TXT source files (with ### PAGE N ### markers)
-python txt_to_json.py --input sources/raw/ --output sources/
-
-# Ingest into ChromaDB
-python ingest.py
-```
+> **[REDACTED]** *The precise tools and commands for formatting and database ingestion have been hidden in this public documentation.*
+> 
+> *General Process:* The prepared primary source documents and metadata are ingested into a vector database (ChromaDB) using semantic embeddings. This integrates the dataset with the core model pipeline, creating the foundational knowledge base the LLM searches to generate cited, historically accurate responses.
 
 ### Step 4: Run
 
@@ -204,50 +196,25 @@ That's it. The entire RAG pipeline, citation engine, and frontends adapt automat
 
 ## Source File Format
 
-### TXT Files (for conversion)
-
-Place page markers in your `.txt` files:
-
-```
-### PAGE 1 ###
-Content of page 1...
-
-### PAGE 2 ###
-Content of page 2...
-```
-
-Supported delimiters: `### PAGE N ###`, `--- page N ---`, `[PAGE N]`, form feeds (`\f`).
-
-### JSON Schema (canonical format)
-
-```json
-[
-  {
-    "text": "Full text content of this page/section...",
-    "page_number": 42,
-    "volume": "3",
-    "chapter": "Chapter Title",
-    "section": "Section Name",
-    "source_file": "original_filename.txt",
-    "book_name": "Full Book Title"
-  }
-]
-```
+> **[REDACTED]** *The specific schema and formatting rules for the raw data have been hidden.*
+> 
+> *Integration Summary:* The framework is built to process structured or semi-structured text data. The crucial integration step involves preserving metadata (such as book titles, chapter contexts, and original page numbers) alongside the text. When this dataset is chunked and embedded via Voyage AI into ChromaDB, the metadata is permanently attached to the semantic vectors, thereby enabling the output model to provide precise, page-level citations in its responses.
 
 ## LLM Provider Configuration
 
 | Provider | Env Variable | Best For | Cost |
 |----------|-------------|----------|------|
-| Gemini 2.5 Flash | `LLM_PROVIDER=gemini` | Free tier, large corpora | Free (rate-limited) |
+| Gemini 2.5 Flash | `LLM_PROVIDER=gemini` | Free tier, large corpora | Free |
 | Claude Sonnet | `LLM_PROVIDER=claude` | Superior persona fidelity | Paid |
 
-**Note:** Embeddings always use Gemini (free tier) regardless of the generation provider.
+**Note:** Embeddings exclusively use **Voyage AI (voyage-3.5-lite)** for superior retrieval and context windows, regardless of the generation provider.
 
 Set in `.env`:
 ```
 LLM_PROVIDER=gemini          # or "claude"
-GEMINI_API_KEY=your-key       # Always required (for embeddings)
+GEMINI_API_KEY=your-key       # Required for the response generator
 ANTHROPIC_API_KEY=your-key    # Only if using Claude
+VOYAGE_API_KEY=your-key       # Always required (for embeddings)
 ```
 
 ## Project Structure
