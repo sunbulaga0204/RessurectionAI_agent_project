@@ -1,7 +1,15 @@
 """
 Vector Store — manages ChromaDB for embedding storage and retrieval.
-Uses Gemini embedding API (free tier compatible).
-Collection name derived from persona for multi-persona support.
+Uses Voyage AI (voyage-3.5-lite) for embeddings.
+
+Key advantages over the previous Gemini embedding setup:
+  - input_type="document" vs "query" distinction improves retrieval accuracy
+  - 32,000-token context window handles long classical text passages
+  - 5x cheaper than Google text-embedding at $0.02/1M tokens
+  - 200M free tokens for new Voyage accounts
+  - Supports MRL: flexible output dimensions (256 / 512 / 1024 / 2048)
+
+Collection name is derived from persona for multi-persona support.
 """
 
 from __future__ import annotations
@@ -11,7 +19,7 @@ import time
 from typing import Optional
 
 import chromadb
-from google import genai
+import voyageai
 
 import config
 
@@ -19,7 +27,7 @@ import config
 # ── Module-level state ───────────────────────────────────
 _client: Optional[chromadb.PersistentClient] = None
 _collection: Optional[chromadb.Collection] = None
-_genai_client: Optional[genai.Client] = None
+_voyage_client: Optional[voyageai.Client] = None
 
 
 def _get_collection_name() -> str:
@@ -38,12 +46,17 @@ def _get_collection_name() -> str:
         return "persona_sources"
 
 
-def _get_genai_client() -> genai.Client:
-    """Lazy-initialize the Gemini client for embeddings."""
-    global _genai_client
-    if _genai_client is None:
-        _genai_client = genai.Client(api_key=config.GEMINI_API_KEY)
-    return _genai_client
+def _get_voyage_client() -> voyageai.Client:
+    """Lazy-initialize the Voyage AI client."""
+    global _voyage_client
+    if _voyage_client is None:
+        if not config.VOYAGE_API_KEY:
+            raise ValueError(
+                "VOYAGE_API_KEY is not set. "
+                "Add it to your .env file. Get a free key at https://www.voyageai.com"
+            )
+        _voyage_client = voyageai.Client(api_key=config.VOYAGE_API_KEY)
+    return _voyage_client
 
 
 def initialize():
@@ -87,20 +100,30 @@ def get_existing_ids() -> list[str]:
     return all_ids
 
 
-def _embed_texts(texts: list[str]) -> list[list[float]]:
-    """Embed a batch of texts using Gemini embedding model."""
-    client = _get_genai_client()
-    result = client.models.embed_content(
+def _embed_texts(texts: list[str], input_type: str = "document") -> list[list[float]]:
+    """
+    Embed a batch of texts using Voyage AI.
+
+    Args:
+        texts: List of text strings to embed.
+        input_type: "document" during ingestion, "query" during retrieval.
+                    Voyage prepends task-specific prompts based on this, which
+                    significantly improves retrieval accuracy.
+    """
+    client = _get_voyage_client()
+    result = client.embed(
+        texts,
         model=config.EMBEDDING_MODEL,
-        contents=texts,
+        input_type=input_type,
+        output_dimension=config.VOYAGE_OUTPUT_DIMENSION,
     )
-    return [emb.values for emb in result.embeddings]
+    return result.embeddings
 
 
 def ingest(chunks: list[dict]):
     """
     Embed and store source chunks in ChromaDB.
-    Rate-limited for free tier compatibility.
+    Voyage supports batches of up to 128 texts and imposes no artificial rate limit.
     """
     if _collection is None:
         initialize()
@@ -109,7 +132,7 @@ def ingest(chunks: list[dict]):
     batch_size = config.EMBED_BATCH_SIZE
     delay = config.EMBED_DELAY_SECONDS
 
-    print(f"\n📥 Ingesting {total} chunks (batch={batch_size}, delay={delay}s)...")
+    print(f"\n📥 Ingesting {total} chunks (batch={batch_size})...")
 
     for i in range(0, total, batch_size):
         batch = chunks[i:i + batch_size]
@@ -123,7 +146,8 @@ def ingest(chunks: list[dict]):
                 meta[key] = str(value)
 
         try:
-            embeddings = _embed_texts(batch_texts)
+            # Use input_type="document" so Voyage optimizes for passage retrieval
+            embeddings = _embed_texts(batch_texts, input_type="document")
 
             _collection.upsert(
                 ids=batch_ids,
@@ -137,10 +161,11 @@ def ingest(chunks: list[dict]):
 
         except Exception as e:
             print(f"  ✗ Error at batch {i // batch_size + 1}: {e}")
-            print(f"    Retrying after {delay * 2}s...")
-            time.sleep(delay * 2)
+            wait = max(delay * 2, 5)
+            print(f"    Retrying after {wait}s...")
+            time.sleep(wait)
             try:
-                embeddings = _embed_texts(batch_texts)
+                embeddings = _embed_texts(batch_texts, input_type="document")
                 _collection.upsert(
                     ids=batch_ids,
                     embeddings=embeddings,
@@ -152,8 +177,7 @@ def ingest(chunks: list[dict]):
             except Exception as retry_err:
                 print(f"  ✗ Retry failed: {retry_err}. Skipping batch.")
 
-        # Rate-limit delay between batches
-        if i + batch_size < total:
+        if delay > 0 and i + batch_size < total:
             time.sleep(delay)
 
     print(f"\n✅ Ingestion complete. Collection has {_collection.count()} documents.")
@@ -163,6 +187,10 @@ def query(text: str, top_k: int = None) -> list[dict]:
     """
     Embed the query and perform similarity search.
 
+    Uses input_type="query" so Voyage prepends a search-query-specific prompt,
+    which is tuned to find relevant document passages — distinct from "document"
+    embeddings created during ingestion.
+
     Returns:
         List of dicts with: text, metadata (including page_number), distance
     """
@@ -171,17 +199,15 @@ def query(text: str, top_k: int = None) -> list[dict]:
 
     top_k = top_k or config.TOP_K
 
-    # Embed the query
-    query_embedding = _embed_texts([text])[0]
+    # Embed with query-specific prompt type for better retrieval accuracy
+    query_embedding = _embed_texts([text], input_type="query")[0]
 
-    # Search
     results = _collection.query(
         query_embeddings=[query_embedding],
         n_results=top_k,
         include=["documents", "metadatas", "distances"],
     )
 
-    # Format results
     chunks = []
     if results and results["documents"]:
         for i in range(len(results["documents"][0])):

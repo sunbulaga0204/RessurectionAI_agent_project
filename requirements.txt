@@ -1,5 +1,6 @@
 google-genai
 anthropic
+voyageai
 python-telegram-bot[ext]
 python-dotenv
 chromadb

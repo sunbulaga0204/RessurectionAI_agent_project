@@ -346,4 +346,8 @@ Each persona uses a different ChromaDB collection (derived from `persona.json`'s
 
 ## License
 
-This is a research tool framework. The source texts and persona configurations are the responsibility of the deployer to ensure proper attribution and rights.
+This project is licensed under the GNU Affero General Public License v3.0 (AGPLv3) - see the [LICENSE](LICENSE) file for details.
+
+This is a strong copyleft license that ensures anyone who modifies this framework and makes it available over a network (such as a web chatbot or Telegram bot) must also share their modified source code.
+
+*Note: The user-provided source texts and persona configurations used within the framework remain the responsibility of the deployer to ensure proper attribution and rights.*
