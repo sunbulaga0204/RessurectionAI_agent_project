@@ -4,6 +4,8 @@
 
 A replicable RAG-based framework for creating AI chatbot personas of historical scholars and figures, strictly grounded in their primary source texts. Every response cites specific pages and sources — no hallucination, no fabrication.
 
+![Frontend Appearance of Abu Hamid al-Ghazali](ghazali-preview.png)
+
 **Created by Anggi Azzuhri**
 
 Built with Python · ChromaDB · Gemini/Claude · FastAPI · Telegram
@@ -207,7 +209,7 @@ That's it. The entire RAG pipeline, citation engine, and frontends adapt automat
 | Gemini 2.5 Flash | `LLM_PROVIDER=gemini` | Free tier, large corpora | Free |
 | Claude Sonnet | `LLM_PROVIDER=claude` | Superior persona fidelity | Paid |
 
-**Note:** Embeddings exclusively use **Voyage AI (voyage-3.5-lite)** for superior retrieval and context windows, regardless of the generation provider.
+**Note:** Embeddings exclusively use **Voyage AI (voyage-4-lite)** for superior retrieval and context windows, regardless of the generation provider.
 
 Set in `.env`:
 ```

@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-import config
+import core.config as config
 
 
 # ── In-memory session store ──────────────────────────────
@@ -21,10 +21,11 @@ import config
 _sessions: dict[str, dict] = {}
 
 
-def create_session() -> str:
-    """Create a new session and return its ID."""
-    session_id = str(uuid.uuid4())[:8]
+def create_session(tenant_id: str) -> str:
+    """Create a new session sandboxed to a specific tenant."""
+    session_id = f"{tenant_id}_{str(uuid.uuid4())[:8]}"
     _sessions[session_id] = {
+        "tenant_id": tenant_id,
         "turns": [],
         "created_at": time.time(),
         "last_active": time.time(),
@@ -32,20 +33,21 @@ def create_session() -> str:
     return session_id
 
 
-def get_or_create_session(session_id: Optional[str] = None) -> str:
-    """Get an existing session or create a new one. Expires stale sessions."""
+def get_or_create_session(tenant_id: str, session_id: Optional[str] = None) -> str:
+    """Get an existing session or create a new one, verifying tenant boundaries."""
     if session_id and session_id in _sessions:
         session = _sessions[session_id]
-        # Check TTL
-        age_hours = (time.time() - session["created_at"]) / 3600
-        if age_hours < config.SESSION_TTL_HOURS:
-            session["last_active"] = time.time()
-            return session_id
-        else:
-            # Session expired
-            del _sessions[session_id]
+        if session["tenant_id"] == tenant_id:
+            # Check TTL
+            age_hours = (time.time() - session["created_at"]) / 3600
+            if age_hours < config.SESSION_TTL_HOURS:
+                session["last_active"] = time.time()
+                return session_id
+            else:
+                # Session expired
+                del _sessions[session_id]
 
-    return create_session()
+    return create_session(tenant_id)
 
 
 def add_turn(session_id: str, role: str, content: str):

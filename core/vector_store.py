@@ -1,15 +1,10 @@
 """
 Vector Store — manages ChromaDB for embedding storage and retrieval.
-Uses Voyage AI (voyage-3.5-lite) for embeddings.
+Uses Voyage AI (voyage-4-lite) for embeddings.
 
-Key advantages over the previous Gemini embedding setup:
-  - input_type="document" vs "query" distinction improves retrieval accuracy
-  - 32,000-token context window handles long classical text passages
-  - 5x cheaper than Google text-embedding at $0.02/1M tokens
-  - 200M free tokens for new Voyage accounts
-  - Supports MRL: flexible output dimensions (256 / 512 / 1024 / 2048)
-
-Collection name is derived from persona for multi-persona support.
+Refactored for Multi-Tenant SaaS Architecture:
+Each persona relies on their specific tenant_id to create isolated collections.
+Queries are additionally locked by death_date_ah (Anno Hegirae) to ensure accuracy.
 """
 
 from __future__ import annotations
@@ -21,29 +16,21 @@ from typing import Optional
 import chromadb
 import voyageai
 
-import config
+import core.config as config
 
 
 # ── Module-level state ───────────────────────────────────
 _client: Optional[chromadb.PersistentClient] = None
-_collection: Optional[chromadb.Collection] = None
 _voyage_client: Optional[voyageai.Client] = None
 
 
-def _get_collection_name() -> str:
-    """Derive collection name from persona file for multi-persona support."""
-    try:
-        with open(config.PERSONA_FILE, 'r', encoding='utf-8') as f:
-            persona = json.load(f)
-        name = persona.get("name_display", persona.get("name", "persona"))
-        # Sanitize for ChromaDB (alphanumeric + underscores, 3-63 chars)
-        sanitized = "".join(c if c.isalnum() else "_" for c in name)
-        sanitized = sanitized.strip("_")[:63]
-        if len(sanitized) < 3:
-            sanitized = "persona_sources"
-        return sanitized
-    except Exception:
-        return "persona_sources"
+def _get_collection_name(tenant_id: str) -> str:
+    """Sanitize tenant_id for ChromaDB collection naming."""
+    sanitized = "".join(c if c.isalnum() else "_" for c in tenant_id)
+    sanitized = sanitized.strip("_")[:63]
+    if len(sanitized) < 3:
+        sanitized = "tenant_sources"
+    return f"tenant_{sanitized}"
 
 
 def _get_voyage_client() -> voyageai.Client:
@@ -60,37 +47,38 @@ def _get_voyage_client() -> voyageai.Client:
 
 
 def initialize():
-    """Create or load the persistent ChromaDB collection."""
-    global _client, _collection
+    """Load the persistent ChromaDB client."""
+    global _client
+    if _client is None:
+        _client = chromadb.PersistentClient(path=config.CHROMA_DIR)
+        print(f"  ✓ ChromaDB client initialized at {config.CHROMA_DIR}")
 
-    _client = chromadb.PersistentClient(path=config.CHROMA_DIR)
-    collection_name = _get_collection_name()
-    _collection = _client.get_or_create_collection(
+
+def _get_collection(tenant_id: str) -> chromadb.Collection:
+    """Get or create the collection for a specific tenant."""
+    initialize()
+    collection_name = _get_collection_name(tenant_id)
+    return _client.get_or_create_collection(
         name=collection_name,
         metadata={"hnsw:space": "cosine"},
     )
-    print(f"  ✓ ChromaDB initialized at {config.CHROMA_DIR}")
-    print(f"    Collection '{collection_name}' has {_collection.count()} documents")
 
 
-def is_ingested() -> bool:
-    """Check if the collection already has data."""
-    if _collection is None:
-        initialize()
-    return _collection.count() > 0
+def is_ingested(tenant_id: str) -> bool:
+    """Check if the tenant collection already has data."""
+    coll = _get_collection(tenant_id)
+    return coll.count() > 0
 
 
-def get_existing_ids() -> list[str]:
-    """Return all chunk IDs currently stored (batched for large collections)."""
-    if _collection is None:
-        initialize()
-
+def get_existing_ids(tenant_id: str) -> list[str]:
+    """Return all chunk IDs currently stored for a tenant."""
+    coll = _get_collection(tenant_id)
     all_ids = []
     batch_size = 10000
     offset = 0
 
     while True:
-        results = _collection.get(limit=batch_size, offset=offset)
+        results = coll.get(limit=batch_size, offset=offset)
         batch_ids = results["ids"]
         if not batch_ids:
             break
@@ -120,19 +108,18 @@ def _embed_texts(texts: list[str], input_type: str = "document") -> list[list[fl
     return result.embeddings
 
 
-def ingest(chunks: list[dict]):
+def ingest(tenant_id: str, death_date_ah: str, chunks: list[dict]):
     """
-    Embed and store source chunks in ChromaDB.
-    Voyage supports batches of up to 128 texts and imposes no artificial rate limit.
+    Embed and store source chunks in ChromaDB for a specific tenant.
+    Attaches death_date_ah to ensure chronological accuracy locking.
     """
-    if _collection is None:
-        initialize()
+    coll = _get_collection(tenant_id)
 
     total = len(chunks)
     batch_size = config.EMBED_BATCH_SIZE
     delay = config.EMBED_DELAY_SECONDS
 
-    print(f"\n📥 Ingesting {total} chunks (batch={batch_size})...")
+    print(f"\n📥 Ingesting {total} chunks for '{tenant_id}' (batch={batch_size})...")
 
     for i in range(0, total, batch_size):
         batch = chunks[i:i + batch_size]
@@ -140,22 +127,20 @@ def ingest(chunks: list[dict]):
         batch_ids = [c["chunk_id"] for c in batch]
         batch_metadatas = [c["metadata"] for c in batch]
 
-        # Convert metadata values to strings (ChromaDB requirement)
+        # Convert metadata values to strings and inject death date lock
         for meta in batch_metadatas:
             for key, value in meta.items():
                 meta[key] = str(value)
+            meta["death_date_ah"] = str(death_date_ah)
 
         try:
-            # Use input_type="document" so Voyage optimizes for passage retrieval
             embeddings = _embed_texts(batch_texts, input_type="document")
-
-            _collection.upsert(
+            coll.upsert(
                 ids=batch_ids,
                 embeddings=embeddings,
                 documents=batch_texts,
                 metadatas=batch_metadatas,
             )
-
             progress = min(i + batch_size, total)
             print(f"  [{progress}/{total}] chunks embedded and stored")
 
@@ -166,7 +151,7 @@ def ingest(chunks: list[dict]):
             time.sleep(wait)
             try:
                 embeddings = _embed_texts(batch_texts, input_type="document")
-                _collection.upsert(
+                coll.upsert(
                     ids=batch_ids,
                     embeddings=embeddings,
                     documents=batch_texts,
@@ -180,31 +165,23 @@ def ingest(chunks: list[dict]):
         if delay > 0 and i + batch_size < total:
             time.sleep(delay)
 
-    print(f"\n✅ Ingestion complete. Collection has {_collection.count()} documents.")
+    print(f"\n✅ Ingestion complete. Collection '{tenant_id}' has {coll.count()} documents.")
 
 
-def query(text: str, top_k: int = None) -> list[dict]:
+def query(tenant_id: str, text: str, death_date_ah: str, top_k: int = None) -> list[dict]:
     """
-    Embed the query and perform similarity search.
-
-    Uses input_type="query" so Voyage prepends a search-query-specific prompt,
-    which is tuned to find relevant document passages — distinct from "document"
-    embeddings created during ingestion.
-
-    Returns:
-        List of dicts with: text, metadata (including page_number), distance
+    Embed the query and perform similarity search on a specific tenant.
+    Filters exclusively by death_date_ah to lock chronological accuracy.
     """
-    if _collection is None:
-        initialize()
-
+    coll = _get_collection(tenant_id)
     top_k = top_k or config.TOP_K
 
-    # Embed with query-specific prompt type for better retrieval accuracy
     query_embedding = _embed_texts([text], input_type="query")[0]
 
-    results = _collection.query(
+    results = coll.query(
         query_embeddings=[query_embedding],
         n_results=top_k,
+        where={"death_date_ah": str(death_date_ah)},
         include=["documents", "metadatas", "distances"],
     )
 
@@ -220,17 +197,16 @@ def query(text: str, top_k: int = None) -> list[dict]:
     return chunks
 
 
-def get_source_stats() -> dict:
-    """Get statistics about all ingested sources."""
-    if _collection is None:
-        initialize()
+def get_source_stats(tenant_id: str) -> dict:
+    """Get statistics about all ingested sources for a tenant."""
+    coll = _get_collection(tenant_id)
 
     all_metadatas = []
     batch_size = 10000
     offset = 0
 
     while True:
-        results = _collection.get(
+        results = coll.get(
             include=["metadatas"],
             limit=batch_size,
             offset=offset,
@@ -255,14 +231,10 @@ def get_source_stats() -> dict:
     }
 
 
-def clear():
-    """Delete ALL data from the collection."""
-    global _collection
+def clear(tenant_id: str):
+    """Delete ALL data from a tenant's collection."""
+    global _client
     if _client is not None:
-        collection_name = _get_collection_name()
+        collection_name = _get_collection_name(tenant_id)
         _client.delete_collection(collection_name)
-        _collection = _client.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
-        print("  ✓ Collection cleared")
+        print(f"  ✓ Collection '{collection_name}' cleared")

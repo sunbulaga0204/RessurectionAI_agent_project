@@ -14,11 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional
 
-import config
-import vector_store
-import llm_client
-import session_manager
-from system_prompt import get_persona_info, load_persona
+import core.config as config
+import core.vector_store as vector_store
+import core.llm_client as llm_client
+import core.session_manager as session_manager
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +26,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize services on startup."""
-    print("\n🗄️  Loading vector store...")
+    """Initialize core services on startup."""
+    print("\n🗄️  Connecting to ChromaDB SaaS Node...")
     vector_store.initialize()
-    if vector_store.is_ingested():
-        stats = vector_store.get_source_stats()
-        print(f"  ✓ {stats['total_chunks']} chunks from: {', '.join(stats['books'])}")
-    else:
-        print("  ⚠ No sources ingested yet. Run 'python ingest.py' first.")
     yield
-    print("\n👋 Shutting down...")
+    print("\n👋 SaaS Core Node shutting down...")
 
 
 # ── App ──────────────────────────────────────────────────
@@ -59,6 +53,8 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     query: str
+    system_prompt: str
+    death_date_ah: str
     session_id: Optional[str] = None
 
 
@@ -94,80 +90,65 @@ async def health():
 
 @app.get("/api/persona")
 async def persona():
-    """Return persona info for frontend display."""
-    return get_persona_info()
+    """Return empty persona info for headless mode."""
+    return {"name": "SaaS Platform", "description": "Core routing backend"}
 
 
-@app.get("/api/sources")
-async def sources():
-    """Return list of ingested sources."""
-    stats = vector_store.get_source_stats()
+@app.get("/api/v1/{tenant_id}/sources")
+async def sources(tenant_id: str):
+    """Return list of ingested sources for a specific tenant."""
+    stats = vector_store.get_source_stats(tenant_id)
     return stats
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
+@app.post("/api/v1/{tenant_id}/chat", response_model=ChatResponse)
+async def chat(tenant_id: str, req: ChatRequest):
     """
-    Main chat endpoint — runs the RAG pipeline:
-    1. Get/create session
-    2. Retrieve relevant chunks
-    3. Generate persona-voiced answer
-    4. Verify grounding
-    5. Store in session memory
+    SaaS Chat endpoint — runs the isolated RAG pipeline.
     """
-    # Session management
-    session_id = session_manager.get_or_create_session(req.session_id)
+    # Session management sandboxed by tenant
+    session_id = session_manager.get_or_create_session(tenant_id, req.session_id)
     history = session_manager.get_history(session_id)
 
-    # Get persona info
-    try:
-        persona = load_persona()
-        persona_name = persona.get("name_display", persona.get("name", "Persona"))
-    except Exception:
-        persona_name = "Persona"
-
-    # Check if sources are ingested
-    if not vector_store.is_ingested():
+    # Check if sources are ingested for this tenant
+    if not vector_store.is_ingested(tenant_id):
         return ChatResponse(
-            answer_text="No source texts have been loaded yet. The administrator needs to run the ingestion script first.",
+            answer_text="No source texts have been linked to this persona. The administrator needs to run the ingestion script.",
             can_answer=False,
             session_id=session_id,
-            persona_name=persona_name,
         )
 
     try:
-        # Retrieve relevant chunks
-        retrieved_chunks = vector_store.query(req.query, top_k=config.TOP_K)
+        # Retrieve relevant chunks with precise chronological locking
+        retrieved_chunks = vector_store.query(
+            tenant_id=tenant_id,
+            text=req.query,
+            death_date_ah=req.death_date_ah,
+            top_k=config.TOP_K
+        )
 
         if not retrieved_chunks:
-            refusal = persona.get("refusal_style", "I cannot address this query from my documented works.")
             return ChatResponse(
-                answer_text=refusal,
+                answer_text="I cannot address this query from my documented works.",
                 can_answer=False,
                 session_id=session_id,
-                persona_name=persona_name,
             )
 
-        # Generate answer with conversation history
-        result = llm_client.generate_answer(req.query, retrieved_chunks, history)
+        # Generate answer with provided system prompt and history
+        result = llm_client.generate_answer(req.query, retrieved_chunks, req.system_prompt, history)
 
         # Verify grounding
         if result.get("can_answer") and config.ENABLE_VERIFICATION:
             is_grounded = llm_client.verify_answer(retrieved_chunks, result)
             if not is_grounded:
                 result["can_answer"] = False
-                result["answer_text"] = (
-                    "I found some relevant passages, but I could not verify that my "
-                    "response is strictly grounded in the source texts. "
-                    "I prefer not to provide an unverified answer."
-                )
+                result["answer_text"] = "I prefer not to provide an unverified answer."
                 result["citations"] = []
 
-        # Store turns in session memory
+        # Store turns in sandboxed session memory
         session_manager.add_turn(session_id, "user", req.query)
         session_manager.add_turn(session_id, "assistant", result.get("answer_text", ""))
 
-        # Periodic cleanup
         session_manager.cleanup_expired()
 
         return ChatResponse(
@@ -177,7 +158,6 @@ async def chat(req: ChatRequest):
             follow_up=result.get("follow_up", ""),
             closing=result.get("closing", ""),
             session_id=session_id,
-            persona_name=persona_name,
         )
 
     except Exception as e:
@@ -186,30 +166,15 @@ async def chat(req: ChatRequest):
             answer_text="An error occurred while processing your question. Please try again.",
             can_answer=False,
             session_id=session_id,
-            persona_name=persona_name,
         )
 
 
-@app.post("/api/export")
+@app.post("/api/v1/export")
 async def export_chat(req: ExportRequest):
     """Export a chat session as JSON or Markdown."""
-    try:
-        persona = load_persona()
-        persona_name = persona.get("name_display", persona.get("name", "Persona"))
-    except Exception:
-        persona_name = "Persona"
-
     if req.format == "markdown":
-        md_text = session_manager.export_session_markdown(req.session_id, persona_name)
+        md_text = session_manager.export_session_markdown(req.session_id, "Persona")
         return PlainTextResponse(md_text, media_type="text/markdown")
     else:
-        data = session_manager.export_session(req.session_id, persona_name)
+        data = session_manager.export_session(req.session_id, "Persona")
         return JSONResponse(data)
-
-
-# ── Serve Static Frontend ────────────────────────────────
-# Must be added LAST so it doesn't catch API routes
-import os
-_static_dir = os.path.join(os.path.dirname(__file__), "static")
-if os.path.isdir(_static_dir):
-    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")

@@ -8,8 +8,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-import config
-from system_prompt import build_system_prompt
+import core.config as config
 
 
 # ── Provider Clients (lazy-initialized) ──────────────────
@@ -167,7 +166,7 @@ Remember: Answer using ONLY the sources above. Respond in the required JSON form
 
 # ── Public API ───────────────────────────────────────────
 
-def generate_answer(query: str, retrieved_chunks: list[dict],
+def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str,
                     conversation_history: list[dict] = None) -> dict:
     """
     Generate a persona-voiced answer grounded in source chunks.
@@ -175,13 +174,24 @@ def generate_answer(query: str, retrieved_chunks: list[dict],
     Args:
         query: User's question
         retrieved_chunks: Chunks from vector store search
+        system_prompt: The detailed persona ruleset
         conversation_history: Previous turns for context (optional)
 
     Returns:
         Parsed JSON response dict with: can_answer, answer_text, citations[], etc.
     """
-    system_prompt = build_system_prompt()
     sources_text = _format_chunks_for_prompt(retrieved_chunks)
+
+    # ── Input Length Enforcement ─────────────────────────────
+    # Approximation: 4 chars ≈ 1 token (conservative for mixed Arabic/English)
+    full_prompt_len = len(query) + len(sources_text) + len(system_prompt)
+    if conversation_history:
+        full_prompt_len += sum(len(turn["content"]) for turn in conversation_history)
+
+    estimated_tokens = full_prompt_len // 4
+    if estimated_tokens > config.MAX_INPUT_TOKENS:
+        print(f"  ✗ Input limit exceeded: ~{estimated_tokens} tokens vs max {config.MAX_INPUT_TOKENS}")
+        return _empty_response()
 
     try:
         if config.LLM_PROVIDER == "claude":
@@ -279,14 +289,8 @@ Does the GENERATED_ANSWER contain any claims not in the SOURCE_CHUNKS? Respond i
 
 def _empty_response() -> dict:
     """Return a blank response dict."""
-    from system_prompt import load_persona
-    try:
-        persona = load_persona()
-        refusal = persona.get("refusal_style", "I cannot address this matter.")
-        closing = persona.get("closing", "")
-    except Exception:
-        refusal = "I cannot address this matter."
-        closing = ""
+    refusal = "I cannot address this matter."
+    closing = ""
 
     return {
         "can_answer": False,

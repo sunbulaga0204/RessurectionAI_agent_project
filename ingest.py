@@ -1,7 +1,7 @@
 """
 Ingestion Script — loads, chunks, embeds, and stores source texts.
 
-Embedding: Voyage AI (voyage-3.5-lite) — $0.02/1M tokens, 200M free.
+Embedding: Voyage AI (voyage-4-lite) — 200M free tokens.
 Output model: Gemini / Claude (configured via LLM_PROVIDER in .env).
 
 Run once before starting the bot:
@@ -14,11 +14,11 @@ Run once before starting the bot:
 
 import sys
 import time
-
-import config
-from data_loader import load_all_sources
-from chunker import chunk_all_documents
-import vector_store
+import argparse
+from core import config
+from core.data_loader import load_all_sources
+from core.chunker import chunk_all_documents
+import core.vector_store as vector_store
 
 
 def _validate_config():
@@ -45,6 +45,15 @@ def _validate_config():
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Ingest sources into the vector store.")
+    parser.add_argument("--tenant", type=str, required=True, help="ID of the tenant/persona (e.g., ghazali).")
+    parser.add_argument("--death-date", type=str, required=True, help="Death date AH for accuracy constraints (e.g., 505).")
+    parser.add_argument("--openiti", type=str, help="Raw GitHub URL of an OpenITI mARkdown file to fetch and ingest.", default=None)
+    args = parser.parse_args()
+
+    tenant_id = args.tenant
+    death_date_ah = args.death_date
+
     print("=" * 60)
     print("  📥  Resurrection Agent — Source Ingestion")
     print(f"       Embedding model: {config.EMBEDDING_MODEL}")
@@ -55,12 +64,24 @@ def main():
     _validate_config()
 
     # Step 1: Load sources
-    print(f"\n📂 Loading sources from: {config.SOURCES_DIR}")
-    try:
-        documents = load_all_sources(config.SOURCES_DIR)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"\n✗ {e}")
-        sys.exit(1)
+    documents = []
+    if args.openiti:
+        print(f"\n🌐 Fetching OpenITI source from: {args.openiti}")
+        from core.data_loader import load_from_openiti
+        docs = load_from_openiti(args.openiti)
+        if docs:
+            documents.extend(docs)
+            print(f"  ✓ Loaded 1 document from OpenITI")
+        else:
+            print("\n✗ Failed to load or parse OpenITI document.")
+            sys.exit(1)
+    else:
+        print(f"\n📂 Loading sources from: {config.SOURCES_DIR}")
+        try:
+            documents = load_all_sources(config.SOURCES_DIR)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"\n✗ {e}")
+            sys.exit(1)
 
     print(f"\n  Total documents loaded: {len(documents)}")
 
@@ -74,10 +95,10 @@ def main():
     print("\n🗄️  Initializing ChromaDB...")
     vector_store.initialize()
 
-    # Check if already ingested
-    if vector_store.is_ingested():
-        stats = vector_store.get_source_stats()
-        print(f"\n⚠️  Collection already has {stats['total_chunks']} chunks.")
+    # Check if already ingested for this tenant
+    if vector_store.is_ingested(tenant_id):
+        stats = vector_store.get_source_stats(tenant_id)
+        print(f"\n⚠️  Collection '{tenant_id}' already has {stats['total_chunks']} chunks.")
         print("   ⚠️  If those were embedded with a DIFFERENT model (e.g. Gemini),")
         print("       you MUST re-ingest — mixed vectors will give wrong results.")
         print("\n   Options:")
@@ -86,14 +107,14 @@ def main():
         print("     [N] Cancel")
         response = input("   Choice [c/y/N]: ").strip().lower()
         if response == "y":
-            vector_store.clear()
+            vector_store.clear(tenant_id)
         elif response == "c":
-            existing_ids = set(vector_store.get_existing_ids())
+            existing_ids = set(vector_store.get_existing_ids(tenant_id))
             before = len(chunks)
             chunks = [c for c in chunks if c["chunk_id"] not in existing_ids]
             print(f"\n⏩ Resuming: {before - len(chunks)} already stored, {len(chunks)} remaining.")
             if not chunks:
-                print("   Nothing to ingest — all chunks are already stored!")
+                print(f"   Nothing to ingest — all chunks for '{tenant_id}' are already stored!")
                 return
         else:
             print("   Skipping ingestion. Existing data preserved.")
@@ -101,11 +122,11 @@ def main():
 
     # Step 4: Embed and store
     start_time = time.time()
-    vector_store.ingest(chunks)
+    vector_store.ingest(tenant_id, death_date_ah, chunks)
     elapsed = time.time() - start_time
 
     # Summary
-    stats = vector_store.get_source_stats()
+    stats = vector_store.get_source_stats(tenant_id)
     print("\n" + "=" * 60)
     print("  ✅  Ingestion Complete!")
     print("=" * 60)

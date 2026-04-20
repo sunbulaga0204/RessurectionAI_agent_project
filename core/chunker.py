@@ -21,7 +21,7 @@ in every chunk for citation.
 
 import re
 import hashlib
-import config
+import core.config as config
 
 
 # ── Token estimation ──────────────────────────────────────────────────────────

@@ -1,0 +1,76 @@
+DOCUMENTATION: EMBEDDING AND MACHINE LEARNING PIPELINE
+PROJECT: RESSURECTION AGENT
+DATE: 2026-04-20
+
+1. THE EMBEDDING PIPELINE: CONVERTING KNOWLEDGE TO VECTORS
+
+The system transforms raw text documents (classical texts, research notes) into mathematical representations called "embeddings." This allows the machine to perform "semantic search"—finding information by meaning rather than just keyword matching.
+
+A. Data Preparation (Chunking)
+- Strategy: Token-based sliding window.
+- Chunk Size: 800 tokens (~3,200 characters) per segment.
+- Overlap: 100 tokens. This ensures that context at the boundaries of segments is preserved and not lost between cuts.
+
+B. Vector Conversion (Embedding Model)
+- Provider: Voyage AI.
+- Model: voyage-4-lite.
+- Dimensions: 1024-dimensional vectors.
+- Task-Specific Optimization: 
+    - At Ingestion: The system uses 'input_type="document"', signposting to the model that these are permanent knowledge blocks.
+    - At Retrieval: The system uses 'input_type="query"', optimizing the conversion for a question-style input to find the best match.
+
+C. Vector Storage
+- Database: ChromaDB (Persistent).
+- Metric: Cosine Similarity. This measures the angle between two vectors; the smaller the angle, the more semantically related the query is to the source document.
+
+D. Reranking Status
+- No Reranking: Currently, the system relies on high-quality single-stage retrieval from Voyage AI. It does not perform a secondary "reranking" step (where a heavier model re-sorts the results). This keeps responses fast but means retrieval weight is placed entirely on the initial vector similarity.
+
+E. Data Source (Pre-Chunking)
+- Primary Pipeline (OpenITI): The main dataset is ingested directly from the OpenITI repository (an extensive machine-readable corpus of classical Arabic texts). This provides structured, high-quality historical data as the project's foundation.
+- Secondary Pipeline (Filesystem): Before data enters the "Database," the system also loads supplementary raw formats (PDF, DOCX, TXT) from the local `/sources` directory.
+
+2. THE MACHINE LEARNING APPROACH: INFERENCE AND "LEARNING"
+
+While the machine does not "learn" in the sense of training a new model during operation, it uses an approach called Retrieval-Augmented Generation (RAG). It dynamically "learns" the context of each query by reading the specific data retrieved from the vector store.
+
+A. Retrieval Augmented Generation (RAG)
+- Top-K Retrieval: The system pulls the 8 most relevant segments (Top-K=8) from the database based on the vector similarity. These segments are injected directly into the LLM's temporary context window.
+
+B. Local Models vs. Cloud API (Why Funding is Required)
+The current architecture uses Cloud-based APIs (Voyage, Gemini, Claude) rather than local models (like Llama).
+
+- Local Models (Self-Hosted):
+    - Pros: No per-query cost; complete privacy.
+    - Cons: Requires massive infrastructure (High-end NVIDIA GPUs with 24GB+ VRAM). "Small" local models (7B - 8B parameters) often struggle with the complex persona nuances and Arabic-English translation logic required for this project.
+- Advanced API Models (The Current Choice):
+    - Pros: Access to "Extra Large" models (Trillions of parameters) like Gemini or Claude. These models have significantly higher reasoning capabilities and "long context" windows.
+    - Best Fit: For high-fidelity historical resurrection, an advanced model is non-negotiable.
+    - Funding Need: These models require API credits (cost-per-token). To maintain quality without performance bottlenecks, consistent funding for API usage is necessary.
+
+C. Generation Engine (LLM)
+- Primary Models: Google Gemini or Anthropic Claude.
+- Persona Instruction: A dedicated "Persona Engine" blends the retrieved data with a specific character voice using a complex system prompt.
+
+C. Temperature and Determinism
+The "Temperature" setting controls the randomness of the machine's output:
+- Generation Temperature (0.2): Set low to ensure high accuracy and grounding in the sources, while allowing enough flexibility for natural human-like phrasing.
+- Verification Temperature (0.0): Set to absolute zero. This is used for a secondary "Fact-Check" pass where the machine must be rigid, logical, and non-creative to identify potential "hallucinations" (false claims).
+
+D. Hallucination Control (The Verifier)
+Before an answer is delivered, a second LLM process cross-references the generated answer against the source chunks. If the answer contains any claim not explicitly present in the sources, it is flagged and discarded.
+
+
+3. ANALOGY FOR THE NON-EXPERT: THE DIGITAL LIBRARIAN
+
+Imagine you have a library with thousands of books, but no index.
+
+The Embedding Pipeline is like a librarian who reads every single page and summarizes the "theme" of every paragraph into a secret code (a vector). The librarian then organizes the books not by title, but by how "close" their ideas are to each other.
+
+The Vector Store is the library shelf where all these codes are stored in order.
+
+The Machine Learning Approach is the process of you asking a question. When you ask, "What did the author say about happiness?", the librarian doesn't search for the word "happiness." Instead, they use your question to find the secret code for your intent and run to the shelf where the codes for "joy," "well-being," and "peace" are stored.
+
+The Temperature (0.2) is like how much the librarian is allowed to use their own words. At 0.2, they are mostly reading the books to you but smoothing out the sentences so they make sense. If the temperature were 1.0, the librarian might start telling their own stories.
+
+The Verifier (Temperature 0.0) is a strict supervisor standing behind the librarian. Before you hear the answer, the supervisor checks every sentence against the open books on the desk. If the librarian adds even one small detail that isn't written in the book, the supervisor taps them on the shoulder and says, "That's not in the text. Start over."

@@ -2,7 +2,7 @@
 Configuration for the Resurrection Agent.
 Reads settings from environment variables / .env file.
 Supports dual LLM providers (Gemini / Claude).
-Embedding: Voyage AI (voyage-3.5-lite).
+Embedding: Voyage AI (voyage-4-lite).
 """
 
 import os
@@ -39,12 +39,13 @@ TOP_K = int(os.getenv("TOP_K", "8"))
 
 # ── Model Settings ───────────────────────────────────────
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "voyage-3.5-lite")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "voyage-4-lite")
 # MRL output dimension: 256 | 512 | 1024 | 2048
 VOYAGE_OUTPUT_DIMENSION = int(os.getenv("VOYAGE_OUTPUT_DIMENSION", "1024"))
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
-MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "8192"))
+MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "750"))
+MAX_INPUT_TOKENS = int(os.getenv("MAX_INPUT_TOKENS", "6000"))
 
 # ── Verification ─────────────────────────────────────────
 ENABLE_VERIFICATION = os.getenv("ENABLE_VERIFICATION", "true").lower() == "true"

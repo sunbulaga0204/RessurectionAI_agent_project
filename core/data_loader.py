@@ -10,6 +10,7 @@ import os
 import re
 from pathlib import Path
 
+import core.openiti_client as openiti_client
 
 def load_json(filepath: str) -> list[dict]:
     """
@@ -174,3 +175,16 @@ def load_from_text(raw_text: str, book_name: str) -> list[dict]:
             "source_file": "(pasted text)",
         },
     }]
+
+
+def load_from_openiti(url: str) -> list[dict]:
+    """
+    Download and parse a document from an OpenITI raw GitHub URL.
+    Returns a list of Document dicts ready for chunking.
+    """
+    try:
+        raw_text = openiti_client.fetch_openiti_text(url)
+        return openiti_client.parse_openiti(raw_text, url)
+    except Exception as e:
+        print(f"  ✗ Failed to load OpenITI source: {e}")
+        return []
