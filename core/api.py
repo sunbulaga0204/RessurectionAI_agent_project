@@ -60,9 +60,19 @@ class ChatRequest(BaseModel):
 
 class Citation(BaseModel):
     book: str = ""
-    chapter: str = ""
+    chapter: str = ""   # may be omitted by the LLM; defaults to empty
     page_number: str = ""
-    quote: str = ""
+    quote: str = ""    # may be omitted by the LLM; defaults to empty
+
+    @classmethod
+    def from_llm(cls, data: dict) -> "Citation":
+        """Construct from LLM output, coercing None fields to empty strings."""
+        return cls(
+            book=data.get("book") or "",
+            chapter=data.get("chapter") or "",
+            page_number=str(data.get("page_number") or ""),
+            quote=data.get("quote") or "",
+        )
 
 
 class ChatResponse(BaseModel):
@@ -119,13 +129,23 @@ async def chat(tenant_id: str, req: ChatRequest):
         )
 
     try:
-        # Retrieve relevant chunks with precise chronological locking
-        retrieved_chunks = vector_store.query(
-            tenant_id=tenant_id,
-            text=req.query,
-            death_date_ah=req.death_date_ah,
-            top_k=config.TOP_K
-        )
+        # Retrieve with appropriate strategy based on query complexity
+        is_complex = len(req.query) > 60
+        if is_complex:
+            print(f"  🔍 Multi-layer retrieval (complex query, {len(req.query)} chars)")
+            retrieved_chunks = vector_store.query_multilayer(
+                tenant_id=tenant_id,
+                text=req.query,
+                death_date_ah=req.death_date_ah,
+                top_k=config.TOP_K
+            )
+        else:
+            retrieved_chunks = vector_store.query(
+                tenant_id=tenant_id,
+                text=req.query,
+                death_date_ah=req.death_date_ah,
+                top_k=config.TOP_K
+            )
 
         if not retrieved_chunks:
             return ChatResponse(
@@ -154,7 +174,7 @@ async def chat(tenant_id: str, req: ChatRequest):
         return ChatResponse(
             answer_text=result.get("answer_text", ""),
             can_answer=result.get("can_answer", False),
-            citations=[Citation(**c) for c in result.get("citations", [])],
+            citations=[Citation.from_llm(c) for c in result.get("citations", [])],
             follow_up=result.get("follow_up", ""),
             closing=result.get("closing", ""),
             session_id=session_id,

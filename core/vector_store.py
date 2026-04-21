@@ -170,7 +170,7 @@ def ingest(tenant_id: str, death_date_ah: str, chunks: list[dict]):
 
 def query(tenant_id: str, text: str, death_date_ah: str, top_k: int = None) -> list[dict]:
     """
-    Embed the query and perform similarity search on a specific tenant.
+    Layer 1: Embed the query and perform similarity search on a specific tenant.
     Filters exclusively by death_date_ah to lock chronological accuracy.
     """
     coll = _get_collection(tenant_id)
@@ -196,6 +196,88 @@ def query(tenant_id: str, text: str, death_date_ah: str, top_k: int = None) -> l
 
     return chunks
 
+
+def query_multilayer(
+    tenant_id: str,
+    text: str,
+    death_date_ah: str,
+    top_k: int = None,
+    distance_threshold: float = 0.65,
+) -> list[dict]:
+    """
+    Multi-layer retrieval pipeline for long, complex, or highly specific queries.
+
+    Layer 1 — Broad Fetch:
+      Retrieves 3x top_k candidates to cast a wide semantic net.
+
+    Layer 2 — Distance Re-ranking:
+      Drops chunks whose cosine distance exceeds `distance_threshold`
+      (Voyage cosine distances: 0.0 = perfect, 1.0 = orthogonal).
+      Keeps the top_k closest after filtering.
+
+    Layer 3 — Sub-query Expansion:
+      If the query is long (>80 chars), splits it into two sub-queries:
+      the first half and the second half. Each sub-query is run independently
+      and results are merged & deduplicated by chunk_id. This handles cases
+      where a complex multi-part question has components that map to different
+      source regions.
+
+    Returns deduplicated, re-ranked chunks sorted by ascending distance.
+    """
+    top_k = top_k or config.TOP_K
+    coll = _get_collection(tenant_id)
+
+    def _fetch(query_text: str, n: int) -> list[dict]:
+        emb = _embed_texts([query_text], input_type="query")[0]
+        results = coll.query(
+            query_embeddings=[emb],
+            n_results=n,
+            where={"death_date_ah": str(death_date_ah)},
+            include=["documents", "metadatas", "distances"],
+        )
+        out = []
+        if results and results["documents"]:
+            for i in range(len(results["documents"][0])):
+                out.append({
+                    "text": results["documents"][0][i],
+                    "metadata": results["metadatas"][0][i],
+                    "distance": results["distances"][0][i],
+                })
+        return out
+
+    # ── Layer 1: Broad Fetch ──────────────────────────────────────
+    broad_n = min(top_k * 3, 30)  # cap at 30 to avoid token overload
+    candidates = _fetch(text, broad_n)
+
+    # ── Layer 3: Sub-query Expansion for complex queries ──────────
+    words = text.split()
+    if len(text) > 80 and len(words) >= 6:
+        mid = len(words) // 2
+        sub_a = " ".join(words[:mid])
+        sub_b = " ".join(words[mid:])
+        for sub in [sub_a, sub_b]:
+            sub_chunks = _fetch(sub, top_k)
+            candidates.extend(sub_chunks)
+
+    # ── Layer 2: Deduplicate + Distance Filter + Re-rank ──────────
+    seen_ids: set[str] = set()
+    unique: list[dict] = []
+    for chunk in candidates:
+        cid = chunk.get("metadata", {}).get("chunk_index", "") + chunk["text"][:60]
+        if cid not in seen_ids:
+            seen_ids.add(cid)
+            unique.append(chunk)
+
+    # Filter by distance threshold, then sort ascending (closest first)
+    filtered = [c for c in unique if c["distance"] <= distance_threshold]
+    filtered.sort(key=lambda c: c["distance"])
+
+    # If threshold filtered everything, fall back to top_k of raw unique
+    if not filtered:
+        unique.sort(key=lambda c: c["distance"])
+        filtered = unique
+
+    return filtered[:top_k]
 
 def get_source_stats(tenant_id: str) -> dict:
     """Get statistics about all ingested sources for a tenant."""

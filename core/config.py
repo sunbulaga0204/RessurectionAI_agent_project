@@ -45,7 +45,7 @@ VOYAGE_OUTPUT_DIMENSION = int(os.getenv("VOYAGE_OUTPUT_DIMENSION", "1024"))
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
 MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "750"))
-MAX_INPUT_TOKENS = int(os.getenv("MAX_INPUT_TOKENS", "6000"))
+MAX_INPUT_TOKENS = int(os.getenv("MAX_INPUT_TOKENS", "128000"))
 
 # ── Verification ─────────────────────────────────────────
 ENABLE_VERIFICATION = os.getenv("ENABLE_VERIFICATION", "true").lower() == "true"

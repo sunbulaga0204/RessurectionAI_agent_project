@@ -7,6 +7,15 @@ import os
 import json
 import logging
 import aiohttp
+import sys
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Ensure local directory is in path for relative imports
+sys.path.append(str(Path(__file__).parent))
+
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path)
 
 from telegram import Update
 from telegram.ext import (
@@ -25,8 +34,8 @@ logger = logging.getLogger(__name__)
 TELEGRAM_MAX_LENGTH = 4096
 
 # Base configuration for the Persona Client
-TENANT_ID = "ghazali"
-DEATH_DATE_AH = "505"
+TENANT_ID = os.getenv("TENANT_ID", "ghazali")
+DEATH_DATE_AH = os.getenv("DEATH_DATE_AH", "505")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
@@ -41,7 +50,7 @@ def _escape_md(text: str) -> str:
     return text
 
 def _format_response(result: dict) -> str:
-    """Format the API JSON response into a Telegram message."""
+    """Format the compact API JSON response into a Telegram message."""
     parts = []
 
     answer = result.get("answer_text", "")
@@ -50,30 +59,18 @@ def _format_response(result: dict) -> str:
 
     citations = result.get("citations", [])
     if citations:
-        parts.append(f"\n📄 *Sources:*")
+        parts.append(f"\n📖 *Sources:*")
         for i, c in enumerate(citations, 1):
             book = _escape_md(c.get("book", "Unknown"))
-            chapter = _escape_md(c.get("chapter", ""))
             page = _escape_md(str(c.get("page_number", "")))
-            quote = _escape_md(c.get("quote", ""))
-
-            ref_parts = [f"*{book}*"]
-            if chapter:
-                ref_parts.append(f"Ch\\. {chapter}")
+            line = f"\\[{i}\\] *{book}*"
             if page:
-                ref_parts.append(f"p\\. {page}")
-
-            parts.append(f"\n\\[{i}\\] {', '.join(ref_parts)}")
-            if quote:
-                parts.append(f"  _\\\"{quote}\\\"_")
-
-    follow_up = result.get("follow_up", "")
-    if follow_up:
-        parts.append(f"\n💡 {_escape_md(follow_up)}")
+                line += f", {page}"
+            parts.append(line)
 
     closing = result.get("closing", "")
     if closing:
-        parts.append(f"\n__{_escape_md(closing)}__")
+        parts.append(f"\n_{_escape_md(closing)}_")
 
     return "\n".join(parts)
 
@@ -214,31 +211,64 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "session_id": telegram_user_id
     }
 
-    # 2. Sent POST request to Core SaaS Endpoint
-    async with aiohttp.ClientSession() as session:
+    # 2. Send POST request to Core SaaS Endpoint
+    timeout = aiohttp.ClientTimeout(total=90)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         try:
             async with session.post(f"{API_BASE_URL}/{TENANT_ID}/chat", json=payload) as resp:
                 if resp.status != 200:
                     text = await resp.text()
                     await update.message.reply_text(f"❌ Core API Error: {resp.status} - {text}")
                     return
-                
+
                 result = await resp.json()
-                
+
+                # Debug log so we can see what the bot receives
+                can_ans = result.get("can_answer", False)
+                preview = result.get("answer_text", "")[:80]
+                logger.info(f"Response: can_answer={can_ans} | preview='{preview}'")
+
                 # 3. Handle response formatting
+                if not can_ans:
+                    # Show the refusal in plain text (no Markdown parse issues)
+                    await update.message.reply_text(result.get("answer_text", "I cannot address this from my documented works."))
+                    return
+
                 formatted = _format_response(result)
                 await _send_long(update, formatted)
 
+        except aiohttp.ServerTimeoutError:
+            logger.error("API request timed out")
+            await update.message.reply_text("⏳ The backend took too long to respond. Please try again.")
         except Exception as e:
             logger.error(f"Error calling Core API: {e}", exc_info=True)
             await update.message.reply_text("❌ An error occurred connecting to the backend.")
+
 
 # ── Bot Builder ──────────────────────────────────────────
 
 def create_bot() -> Application:
     if not TELEGRAM_BOT_TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN is not set.")
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # High-patience connection settings for slow networks
+    from telegram.request import HTTPXRequest
+    request = HTTPXRequest(
+        connection_pool_size=10,
+        connect_timeout=60.0,  # Wait up to 1 minute to connect
+        read_timeout=60.0,
+        write_timeout=60.0,
+        pool_timeout=60.0,
+    )
+
+    app = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .request(request)
+        .get_updates_request(HTTPXRequest(connect_timeout=60.0, read_timeout=60.0))
+        .build()
+    )
+
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("about", about_command))
