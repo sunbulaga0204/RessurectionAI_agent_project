@@ -3,6 +3,7 @@ Telegram Bot — handles user interactions via Telegram.
 Acts as a frontend client for the Core API SaaS.
 """
 
+import asyncio
 import os
 import json
 import logging
@@ -288,7 +289,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     # 2. Send POST request to Core SaaS Endpoint
-    timeout = aiohttp.ClientTimeout(total=90)
+    # 180s timeout: free-tier LLMs (e.g. Nemotron) can occasionally be slow
+    timeout = aiohttp.ClientTimeout(total=180, connect=10)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         try:
             async with session.post(f"{API_BASE_URL}/{TENANT_ID}/chat", json=payload) as resp:
@@ -313,9 +315,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 formatted = _format_response(result)
                 await _send_long(update, formatted)
 
-        except aiohttp.ServerTimeoutError:
-            logger.error("API request timed out")
-            await update.message.reply_text("⏳ The backend took too long to respond. Please try again.")
+        except (aiohttp.ServerTimeoutError, asyncio.exceptions.CancelledError):
+            logger.warning("API request timed out or was cancelled — LLM may be slow")
+            await update.message.reply_text(
+                "⏳ The scholar is deep in contemplation... The response took too long. "
+                "Please send your question again."
+            )
         except Exception as e:
             logger.error(f"Error calling Core API: {e}", exc_info=True)
             await update.message.reply_text("❌ An error occurred connecting to the backend.")
