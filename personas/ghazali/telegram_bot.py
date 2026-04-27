@@ -36,7 +36,14 @@ TELEGRAM_MAX_LENGTH = 4096
 # Base configuration for the Persona Client
 TENANT_ID = os.getenv("TENANT_ID", "ghazali")
 DEATH_DATE_AH = os.getenv("DEATH_DATE_AH", "505")
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
+
+# Safely compute API_BASE_URL to handle dynamic ports from cloud providers (e.g. Railway)
+raw_api_url = os.getenv("API_BASE_URL", f"http://127.0.0.1:{os.getenv('PORT', '8000')}/api/v1")
+if "${PORT}" in raw_api_url or "${{PORT}}" in raw_api_url:
+    # If the user literally copy-pasted the string with the variable syntax, fix it for them
+    raw_api_url = f"http://127.0.0.1:{os.getenv('PORT', '8000')}/api/v1"
+
+API_BASE_URL = raw_api_url
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # ── Helpers ──────────────────────────────────────────────
