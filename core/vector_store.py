@@ -142,8 +142,10 @@ class PostgresStore(BaseVectorStore):
                         embedding vector(1024)
                     );
                     CREATE INDEX IF NOT EXISTS idx_chunks_tenant ON document_chunks(tenant_id, death_date_ah);
+                    -- HNSW index for lightning fast vector search
+                    CREATE INDEX IF NOT EXISTS idx_chunks_vector ON document_chunks USING hnsw (embedding vector_cosine_ops);
                 """)
-            print("  ✓ PostgreSQL client initialized (Railway/Remote)")
+            print("  ✓ PostgreSQL client initialized (HNSW Index enabled)")
 
     def is_ingested(self, tenant_id: str) -> bool:
         self.initialize()
@@ -192,14 +194,14 @@ class PostgresStore(BaseVectorStore):
         emb_str = str(list(query_embedding))
         
         with self.conn.cursor() as cur:
-            # Using <=> for cosine distance (1 - cosine similarity)
+            # Using <=> for cosine distance
             cur.execute("""
-                SELECT content, metadata, (embedding <=> %s::vector) as distance
+                SELECT content, metadata, (embedding <=> %s::vector) as dist
                 FROM document_chunks
                 WHERE tenant_id = %s AND death_date_ah = %s
-                ORDER BY embedding <=> %s::vector
+                ORDER BY dist
                 LIMIT %s
-            """, (emb_str, tenant_id, str(death_date_ah), emb_str, top_k))
+            """, (emb_str, tenant_id, str(death_date_ah), top_k))
             
             out = []
             for row in cur.fetchall():

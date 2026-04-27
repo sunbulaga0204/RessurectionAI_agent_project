@@ -289,9 +289,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     # 2. Send POST request to Core SaaS Endpoint
-    # 180s timeout: free-tier LLMs (e.g. Nemotron) can occasionally be slow
-    timeout = aiohttp.ClientTimeout(total=180, connect=10)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    # 180s total timeout, 15s for connection start
+    timeout = aiohttp.ClientTimeout(total=180, connect=15, sock_read=180)
+    
+    # Use a connector that keeps the connection alive
+    connector = aiohttp.TCPConnector(keepalive_timeout=30)
+    
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         try:
             async with session.post(f"{API_BASE_URL}/{TENANT_ID}/chat", json=payload) as resp:
                 if resp.status != 200:
@@ -315,7 +319,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 formatted = _format_response(result)
                 await _send_long(update, formatted)
 
-        except (aiohttp.ServerTimeoutError, asyncio.exceptions.CancelledError):
+        except (aiohttp.ServerTimeoutError, asyncio.TimeoutError, asyncio.exceptions.CancelledError):
             logger.warning("API request timed out or was cancelled — LLM may be slow")
             await update.message.reply_text(
                 "⏳ The scholar is deep in contemplation... The response took too long. "
