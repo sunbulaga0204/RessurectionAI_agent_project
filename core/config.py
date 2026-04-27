@@ -45,7 +45,7 @@ TOP_K = int(os.getenv("TOP_K", "8"))
 
 # ── Model Settings ───────────────────────────────────────
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "voyage-4-lite")
 # MRL output dimension: 256 | 512 | 1024 | 2048
 VOYAGE_OUTPUT_DIMENSION = int(os.getenv("VOYAGE_OUTPUT_DIMENSION", "1024"))
