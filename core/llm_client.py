@@ -14,6 +14,7 @@ import core.config as config
 # ── Provider Clients (lazy-initialized) ──────────────────
 _gemini_client = None
 _anthropic_client = None
+_openrouter_client = None
 
 
 def _get_gemini_client():
@@ -32,6 +33,18 @@ def _get_anthropic_client():
         import anthropic
         _anthropic_client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     return _anthropic_client
+
+
+def _get_openrouter_client():
+    """Lazy-initialize the OpenRouter client."""
+    global _openrouter_client
+    if _openrouter_client is None:
+        import openai
+        _openrouter_client = openai.OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=config.OPENROUTER_API_KEY,
+        )
+    return _openrouter_client
 
 
 # ── Verifier Prompt ──────────────────────────────────────
@@ -164,6 +177,44 @@ Remember: Answer using ONLY the sources above. Respond in the required JSON form
     return json.loads(response_text)
 
 
+# ── Generation: OpenRouter ───────────────────────────────
+
+def _generate_openrouter(query: str, sources_text: str, system_prompt: str,
+                         conversation_history: list[dict] = None) -> dict:
+    """Generate answer using OpenRouter."""
+    client = _get_openrouter_client()
+
+    # Build messages with history
+    messages = [{"role": "system", "content": system_prompt}]
+    if conversation_history:
+        for turn in conversation_history:
+            role = "user" if turn["role"] == "user" else "assistant"
+            messages.append({"role": role, "content": turn["content"]})
+
+    user_message = f"""Here are the SOURCE documents you MUST use to answer:
+
+{sources_text}
+
+---
+
+USER QUERY: {query}
+
+Remember: Answer using ONLY the sources above. Respond in the required JSON format. Maintain the persona voice."""
+
+    messages.append({"role": "user", "content": user_message})
+
+    response = client.chat.completions.create(
+        model=config.OPENROUTER_MODEL,
+        messages=messages,
+        temperature=config.TEMPERATURE,
+        max_tokens=config.MAX_OUTPUT_TOKENS,
+        response_format={"type": "json_object"},
+    )
+
+    response_text = response.choices[0].message.content.strip()
+    return json.loads(response_text)
+
+
 # ── Public API ───────────────────────────────────────────
 
 def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str,
@@ -196,10 +247,23 @@ def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str
     try:
         if config.LLM_PROVIDER == "claude":
             result = _generate_claude(query, sources_text, system_prompt, conversation_history)
+        elif config.LLM_PROVIDER == "openrouter":
+            result = _generate_openrouter(query, sources_text, system_prompt, conversation_history)
         else:
             result = _generate_gemini(query, sources_text, system_prompt, conversation_history)
 
-        # Ensure required fields
+        # ── Normalize Response ───────────────────────────────────
+        # Handle variations in field names from different models (Nemotron uses 'response' or 'answer')
+        if "answer" in result and not result.get("answer_text"):
+            result["answer_text"] = result["answer"]
+        if "response" in result and not result.get("answer_text"):
+            result["answer_text"] = result["response"]
+            
+        if result.get("answer_text") and not result.get("can_answer"):
+            # If the model gave an answer but forgot to set the boolean
+            result["can_answer"] = True
+
+        # Ensure required fields exist
         result.setdefault("can_answer", False)
         result.setdefault("answer_mode", "elaborated")
         result.setdefault("quote_primary", "")
@@ -253,6 +317,19 @@ Does the GENERATED_ANSWER contain any claims not in the SOURCE_CHUNKS? Respond i
                 messages=[{"role": "user", "content": verification_message}],
             )
             response_text = response.content[0].text.strip()
+        elif config.LLM_PROVIDER == "openrouter":
+            client = _get_openrouter_client()
+            response = client.chat.completions.create(
+                model=config.OPENROUTER_MODEL,
+                temperature=0.0,
+                max_tokens=256,
+                messages=[
+                    {"role": "system", "content": VERIFIER_PROMPT},
+                    {"role": "user", "content": verification_message}
+                ],
+                response_format={"type": "json_object"},
+            )
+            response_text = response.choices[0].message.content.strip()
         else:
             from google.genai import types
             client = _get_gemini_client()

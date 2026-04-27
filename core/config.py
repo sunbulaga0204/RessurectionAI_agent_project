@@ -11,20 +11,26 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── LLM Provider ─────────────────────────────────────────
-# "gemini" or "claude"
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
+# "gemini", "claude", or "openrouter"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").lower()
 
 # ── API Keys ─────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # Voyage AI — used exclusively for embeddings
 VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
 
+# ── Vector Store ─────────────────────────────────────────
+# "chroma" (local) or "postgres" (cloud/Railway)
+VECTOR_STORE_TYPE = os.getenv("VECTOR_STORE_TYPE", "chroma").lower()
+CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "") # For Railway PostgreSQL
+
 # ── Paths ────────────────────────────────────────────────
 SOURCES_DIR = os.getenv("SOURCES_DIR", "./sources")
-CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma_db")
 PERSONA_FILE = os.getenv("PERSONA_FILE", "./persona.json")
 RESEARCH_NOTES_FILE = os.getenv("RESEARCH_NOTES_FILE", "./research_notes.md")
 
@@ -39,6 +45,7 @@ TOP_K = int(os.getenv("TOP_K", "8"))
 
 # ── Model Settings ───────────────────────────────────────
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "voyage-4-lite")
 # MRL output dimension: 256 | 512 | 1024 | 2048
 VOYAGE_OUTPUT_DIMENSION = int(os.getenv("VOYAGE_OUTPUT_DIMENSION", "1024"))

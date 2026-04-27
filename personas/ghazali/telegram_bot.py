@@ -49,6 +49,69 @@ def _escape_md(text: str) -> str:
         text = text.replace(char, f'\\{char}')
     return text
 
+
+def _detect_language(text: str) -> str:
+    """
+    Detect whether the user's message is in Indonesian, Malay, or English.
+    Returns one of: 'Indonesian', 'Malay', 'Arabic', 'English'.
+    Uses vocabulary heuristics — no external libraries needed.
+    """
+    t = text.lower()
+
+    # Common Indonesian markers (words not found or rare in Malay)
+    id_markers = [
+        'apa', 'bagaimana', 'kenapa', 'mengapa', 'jelaskan', 'ceritakan',
+        'tolong', 'saya', 'adalah', 'dengan', 'tidak', 'sudah', 'bisa',
+        'dalam', 'untuk', 'yang', 'itu', 'ini', 'juga', 'seperti',
+        'menurut', 'tentang', 'apakah', 'bagaimana', 'bahwa',
+    ]
+    # Common Malay markers (words not found or rare in Indonesian)
+    my_markers = [
+        'apa', 'bagaimana', 'kenapa', 'mengapa', 'jelaskan', 'ceritakan',
+        'tolong', 'saya', 'ialah', 'dengan', 'tidak', 'sudah', 'boleh',
+        'dalam', 'untuk', 'yang', 'itu', 'ini', 'juga', 'seperti',
+        'menurut', 'tentang', 'adakah', 'bagaimanakah', 'bahawa',
+    ]
+    # Arabic markers
+    arabic_markers = ['ما', 'كيف', 'لماذا', 'من', 'هل', 'اشرح']
+
+    id_score = sum(1 for w in id_markers if w in t.split())
+    my_score = sum(1 for w in my_markers if w in t.split())
+    ar_score = sum(1 for w in arabic_markers if w in t)
+
+    # Malay-specific differentiators
+    if any(w in t for w in ['bahawa', 'adakah', 'bagaimanakah', 'boleh', 'ialah']):
+        my_score += 3
+    # Indonesian-specific differentiators  
+    if any(w in t for w in ['bahwa', 'apakah', 'bisa', 'adalah', 'kenapa']):
+        id_score += 3
+
+    if ar_score >= 2:
+        return 'Arabic'
+    if id_score == 0 and my_score == 0:
+        return 'English'
+    if my_score > id_score:
+        return 'Malay'
+    if id_score > 0:
+        return 'Indonesian'
+    return 'English'
+
+
+def _add_language_instruction(prompt: str, language: str) -> str:
+    """Append a language override rule to the end of the system prompt."""
+    if language == 'English':
+        return prompt  # default — no injection needed
+    lang_instruction = (
+        f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"LANGUAGE OVERRIDE — HIGHEST PRIORITY\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"The user has written in {language}. You MUST write your "
+        f"answer_text and closing entirely in {language}. "
+        f"Book titles and Arabic terms may remain in their original script. "
+        f"Do NOT switch to English in your response."
+    )
+    return prompt + lang_instruction
+
 def _format_response(result: dict) -> str:
     """Format the compact API JSON response into a Telegram message."""
     parts = []
@@ -204,9 +267,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Error loading persona memory.")
         return
 
+    # Detect user language and inject an override instruction into the prompt
+    detected_lang = _detect_language(query)
+    if detected_lang != 'English':
+        logger.info(f"Language detected: {detected_lang}")
+    prompt_with_lang = _add_language_instruction(prompt, detected_lang)
+
     payload = {
         "query": query,
-        "system_prompt": prompt,
+        "system_prompt": prompt_with_lang,
         "death_date_ah": DEATH_DATE_AH,
         "session_id": telegram_user_id
     }
@@ -284,6 +353,7 @@ def run_bot():
     app.run_polling(
         allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True,
+        stop_signals=None,  # Needed when running in a background thread
     )
 
 if __name__ == "__main__":

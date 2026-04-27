@@ -218,10 +218,28 @@ def chunk_document(
     for i, chunk_text in enumerate(raw_chunks):
         if not chunk_text.strip():
             continue
+
+        # ── Dynamic Page Extraction ──────────────────────────
+        # Find all [p.XX] tags in this chunk
+        page_tags = re.findall(r"\[p\.(\d+)\]", chunk_text)
+        chunk_page = metadata.get("page_number", "")
+        
+        if page_tags:
+            # Use the most frequent page tag in this chunk as the 'canonical' page
+            from collections import Counter
+            chunk_page = Counter(page_tags).most_common(1)[0][0]
+        
+        # Clean the tags from the text for a better LLM experience
+        clean_chunk_text = re.sub(r"\s*\[p\.\d+\]", "", chunk_text).strip()
+
         result.append({
-            "chunk_id": _make_chunk_id(chunk_text, metadata, index=i),
-            "text": chunk_text.strip(),
-            "metadata": {**metadata, "chunk_index": i},
+            "chunk_id": _make_chunk_id(clean_chunk_text, metadata, index=i),
+            "text": clean_chunk_text,
+            "metadata": {
+                **metadata, 
+                "page_number": chunk_page,
+                "chunk_index": i
+            },
         })
 
     return result

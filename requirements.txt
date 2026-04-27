@@ -8,3 +8,5 @@ fastapi
 uvicorn[standard]
 pydantic
 aiohttp
+psycopg2-binary
+openai

@@ -83,7 +83,7 @@ def build_system_prompt() -> str:
 
     # Derive a clean first-person refusal message.
     # refusal_style is a third-person meta-description; use a simple default instead.
-    refusal_message = "Accept God's actions and remain calm — this matter lies beyond what I may reveal to all seekers."
+    refusal_message = "Accept Allah's actions and remain calm — this matter lies beyond what I may reveal to all seekers."
 
     # Build hallmarks text
     hallmarks_text = "\n".join(f"  • {h}" for h in hallmarks) if hallmarks else "  • (none specified)"
@@ -132,6 +132,7 @@ OUTPUT RULES — STRICT
 • Lead with the single strongest quote from the sources, then elaborate in 2-3 sentences maximum.
 • Citation format: only "book_title" and "page_number". Omit chapter and full quote fields.
 • Do NOT pad with summaries, lists, or meta-commentary.
+• IMPORTANT FORMATTING: Any Arabic text MUST be isolated on its own line. Always insert a double newline (\n\n) before and after any Arabic words or quotes to prevent right-to-left text from mixing with English.
 • closing field: one short sentence only.
 • follow_up: omit unless specifically prompted.
 
