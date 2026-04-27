@@ -131,7 +131,7 @@ class PostgresStore(BaseVectorStore):
             self.conn.autocommit = True
             with self.conn.cursor() as cur:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-                cur.execute(\"""
+                cur.execute("""
                     CREATE TABLE IF NOT EXISTS document_chunks (
                         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                         tenant_id text NOT NULL,
@@ -142,7 +142,7 @@ class PostgresStore(BaseVectorStore):
                         embedding vector(1024)
                     );
                     CREATE INDEX IF NOT EXISTS idx_chunks_tenant ON document_chunks(tenant_id, death_date_ah);
-                \""")
+                """)
             print("  ✓ PostgreSQL client initialized (Railway/Remote)")
 
     def is_ingested(self, tenant_id: str) -> bool:
@@ -172,7 +172,7 @@ class PostgresStore(BaseVectorStore):
                 data.append((tenant_id, ids[j], str(death_date_ah), texts[j], json.dumps(metas[j]), embeddings[j]))
             
             with self.conn.cursor() as cur:
-                execute_values(cur, \"""
+                execute_values(cur, """
                     INSERT INTO document_chunks (tenant_id, chunk_id, death_date_ah, content, metadata, embedding)
                     VALUES %s
                     ON CONFLICT (chunk_id) DO UPDATE SET
@@ -209,10 +209,10 @@ class PostgresStore(BaseVectorStore):
     def get_source_stats(self, tenant_id: str) -> Dict:
         self.initialize()
         with self.conn.cursor() as cur:
-            cur.execute(\"""
+            cur.execute("""
                 SELECT count(*), array_agg(DISTINCT (metadata->>'book_name'))
                 FROM document_chunks WHERE tenant_id = %s
-            \""", (tenant_id,))
+            """, (tenant_id,))
             row = cur.fetchone()
             return {"total_chunks": row[0], "books": sorted(row[1]) if row[1] and row[1][0] else []}
 
