@@ -129,20 +129,24 @@ async def chat(tenant_id: str, req: ChatRequest):
         )
 
     try:
-        # Retrieve with appropriate strategy based on query complexity
-        is_complex = len(req.query) > 60
+        # ── Rewrite Query (Contextualization) ────────────────────
+        # Optimize the search string using the chat history and Nemotron Nano
+        search_query = llm_client.rewrite_query(req.query, history)
+
+        # Retrieve with appropriate strategy based on search query complexity
+        is_complex = len(search_query) > 60
         if is_complex:
-            print(f"  🔍 Multi-layer retrieval (complex query, {len(req.query)} chars)")
+            print(f"  🔍 Multi-layer retrieval (complex query, {len(search_query)} chars)")
             retrieved_chunks = vector_store.query_multilayer(
                 tenant_id=tenant_id,
-                text=req.query,
+                text=search_query,
                 death_date_ah=req.death_date_ah,
                 top_k=config.TOP_K
             )
         else:
             retrieved_chunks = vector_store.query(
                 tenant_id=tenant_id,
-                text=req.query,
+                text=search_query,
                 death_date_ah=req.death_date_ah,
                 top_k=config.TOP_K
             )
@@ -155,6 +159,8 @@ async def chat(tenant_id: str, req: ChatRequest):
             )
 
         # Generate answer with provided system prompt and history
+        # Note: We pass the ORIGINAL user query here, not the search query, 
+        # so the bot answers naturally.
         result = llm_client.generate_answer(req.query, retrieved_chunks, req.system_prompt, history)
 
         # Verify grounding

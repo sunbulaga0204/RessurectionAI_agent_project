@@ -215,6 +215,69 @@ Remember: Answer using ONLY the sources above. Respond in the required JSON form
     return json.loads(response_text)
 
 
+# ── Query Rewriting ──────────────────────────────────────
+
+REWRITER_PROMPT = """\
+You are an expert Islamic theologian acting as a search engine librarian.
+Your task is to take a conversational user query and chat history, and rewrite it into a dense, standalone search string.
+The output will be embedded into vectors and matched against classical Arabic theological texts.
+
+Rules:
+1. Translate casual pronouns ("it", "he", "this concept") into the actual subject from the chat history.
+2. If the user uses slang or modern terms, include the formal Arabic equivalent (e.g., "heart" -> "Qalb", "logic" -> "Mantiq").
+3. DO NOT output conversational filler. No "Here is the query" or "Search string:".
+4. ONLY output the bare optimized search string.
+"""
+
+def rewrite_query(query: str, conversation_history: list[dict] = None) -> str:
+    """Rewrite conversational queries into dense search strings."""
+    if not conversation_history:
+        return query  # Nothing to contextualize if it's the first question
+    
+    # We only care about the last few turns
+    history_str = ""
+    for turn in conversation_history[-4:]:
+        role = "User" if turn["role"] == "user" else "Al-Ghazali"
+        # Truncate AI answers so prompt doesn't get too bloated
+        content = turn["content"][:300] + "..." if len(turn["content"]) > 300 else turn["content"]
+        history_str += f"{role}: {content}\n"
+        
+    user_prompt = f"""CHAT HISTORY:
+{history_str}
+
+CURRENT USER QUERY:
+{query}
+
+Rewrite the CURRENT USER QUERY into a highly specific standalone search string based on the context above."""
+
+    try:
+        client = _get_openrouter_client()
+        response = client.chat.completions.create(
+            model=config.REWRITER_MODEL,
+            messages=[
+                {"role": "system", "content": REWRITER_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.0,
+            max_tokens=60,
+        )
+        rewritten = response.choices[0].message.content.strip()
+        
+        # Fallback cleanup if the model hallucinates a conversational prefix
+        for prefix in ["Here is the", "Search string:", "Rewritten:", "Optimized:"]:
+            if rewritten.lower().startswith(prefix.lower()):
+                rewritten = rewritten[len(prefix):].strip()
+        
+        # Remove quotes if the model wrapped the output
+        rewritten = rewritten.strip('"\'')
+        print(f"  🔄 Rewritten query: '{rewritten}' (Original: '{query}')")
+        return rewritten
+
+    except Exception as e:
+        print(f"  ⚠ Rewriter error: {e}. Falling back to original query.")
+        return query
+
+
 # ── Public API ───────────────────────────────────────────
 
 def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str,
