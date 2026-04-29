@@ -61,6 +61,7 @@ Rules:
 - Ensure that any direct quote in the answer is a valid substring of a SOURCE_CHUNK.
 - Flag as hallucinated ONLY if the answer invents historical facts, completely fabricates quotes, or makes claims that directly contradict the provided sources.
 - Do NOT flag the answer as hallucinated just because it uses a conversational or philosophical tone.
+- ANACHRONISM CHECK: Flag as hallucinated if the answer mentions any person, event, or invention that occurred AFTER 505 AH / 1111 CE (e.g. mentions of Ibn Taymiyya, Rumi, modern science, or later history).
 
 Respond in JSON:
 {"hallucinated": true/false, "reason": "Brief explanation"}"""
