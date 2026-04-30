@@ -1,38 +1,18 @@
 """
-LLM Client — dual-provider abstraction for Claude (Anthropic) and Gemini (Google).
-Handles answer generation and hallucination verification.
+LLM Client — OpenRouter-only abstraction.
+Handles query rewriting (fast model), answer generation (large model),
+and hallucination + anachronism verification (fast model).
 """
 
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 import core.config as config
 
 
-# ── Provider Clients (lazy-initialized) ──────────────────
-_gemini_client = None
-_anthropic_client = None
+# ── Provider Client (lazy-initialized) ───────────────────
 _openrouter_client = None
-
-
-def _get_gemini_client():
-    """Lazy-initialize the Gemini client."""
-    global _gemini_client
-    if _gemini_client is None:
-        from google import genai
-        _gemini_client = genai.Client(api_key=config.GEMINI_API_KEY)
-    return _gemini_client
-
-
-def _get_anthropic_client():
-    """Lazy-initialize the Anthropic client."""
-    global _anthropic_client
-    if _anthropic_client is None:
-        import anthropic
-        _anthropic_client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    return _anthropic_client
 
 
 def _get_openrouter_client():
@@ -47,7 +27,7 @@ def _get_openrouter_client():
     return _openrouter_client
 
 
-# ── Verifier Prompt ──────────────────────────────────────
+# ── Prompts ───────────────────────────────────────────────
 
 VERIFIER_PROMPT = """\
 You are a fact-checking engine. You will receive:
@@ -66,157 +46,6 @@ Rules:
 Respond in JSON:
 {"hallucinated": true/false, "reason": "Brief explanation"}"""
 
-
-# ── Source Formatting ────────────────────────────────────
-
-def _format_chunks_for_prompt(chunks: list[dict]) -> str:
-    """Format retrieved chunks as source blocks for the prompt."""
-    source_blocks = []
-    for i, chunk in enumerate(chunks, 1):
-        meta = chunk.get("metadata", {})
-        book = meta.get("book_name", "Unknown")
-        chapter = meta.get("chapter", "")
-        page = meta.get("page_number", "")
-        volume = meta.get("volume", "")
-
-        header = f"[SOURCE {i}]"
-        if book:
-            header += f" [BOOK: {book}]"
-        if chapter:
-            header += f" [CHAPTER: {chapter}]"
-        if page:
-            header += f" [PAGE: {page}]"
-        if volume:
-            header += f" [VOLUME: {volume}]"
-
-        source_blocks.append(f"{header}\n{chunk['text']}\n[END SOURCE {i}]")
-
-    return "\n\n".join(source_blocks)
-
-
-# ── Generation: Gemini ───────────────────────────────────
-
-def _generate_gemini(query: str, sources_text: str, system_prompt: str,
-                     conversation_history: list[dict] = None) -> dict:
-    """Generate answer using Gemini."""
-    from google.genai import types
-
-    client = _get_gemini_client()
-
-    # Build conversation with history
-    contents = []
-    if conversation_history:
-        for turn in conversation_history:
-            contents.append({
-                "role": turn["role"],
-                "parts": [{"text": turn["content"]}],
-            })
-
-    user_message = f"""Here are the SOURCE documents you MUST use to answer:
-
-{sources_text}
-
----
-
-USER QUERY: {query}
-
-Remember: Answer using ONLY the sources above. Respond in the required JSON format. Maintain the persona voice."""
-
-    contents.append({"role": "user", "parts": [{"text": user_message}]})
-
-    response = client.models.generate_content(
-        model=config.GEMINI_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            temperature=config.TEMPERATURE,
-            max_output_tokens=config.MAX_OUTPUT_TOKENS,
-            response_mime_type="application/json",
-        ),
-    )
-
-    return json.loads(response.text.strip())
-
-
-# ── Generation: Claude ───────────────────────────────────
-
-def _generate_claude(query: str, sources_text: str, system_prompt: str,
-                     conversation_history: list[dict] = None) -> dict:
-    """Generate answer using Claude."""
-    client = _get_anthropic_client()
-
-    # Build messages with history
-    messages = []
-    if conversation_history:
-        for turn in conversation_history:
-            role = "user" if turn["role"] == "user" else "assistant"
-            messages.append({"role": role, "content": turn["content"]})
-
-    user_message = f"""Here are the SOURCE documents you MUST use to answer:
-
-{sources_text}
-
----
-
-USER QUERY: {query}
-
-Remember: Answer using ONLY the sources above. Respond in the required JSON format. Maintain the persona voice."""
-
-    messages.append({"role": "user", "content": user_message})
-
-    response = client.messages.create(
-        model=config.CLAUDE_MODEL,
-        max_tokens=config.MAX_OUTPUT_TOKENS,
-        temperature=config.TEMPERATURE,
-        system=system_prompt,
-        messages=messages,
-    )
-
-    # Extract text from Claude response
-    response_text = response.content[0].text.strip()
-    return json.loads(response_text)
-
-
-# ── Generation: OpenRouter ───────────────────────────────
-
-def _generate_openrouter(query: str, sources_text: str, system_prompt: str,
-                         conversation_history: list[dict] = None) -> dict:
-    """Generate answer using OpenRouter."""
-    client = _get_openrouter_client()
-
-    # Build messages with history
-    messages = [{"role": "system", "content": system_prompt}]
-    if conversation_history:
-        for turn in conversation_history:
-            role = "user" if turn["role"] == "user" else "assistant"
-            messages.append({"role": role, "content": turn["content"]})
-
-    user_message = f"""Here are the SOURCE documents you MUST use to answer:
-
-{sources_text}
-
----
-
-USER QUERY: {query}
-
-Remember: Answer using ONLY the sources above. Respond in the required JSON format. Maintain the persona voice."""
-
-    messages.append({"role": "user", "content": user_message})
-
-    response = client.chat.completions.create(
-        model=config.OPENROUTER_MODEL,
-        messages=messages,
-        temperature=config.TEMPERATURE,
-        max_tokens=config.MAX_OUTPUT_TOKENS,
-        response_format={"type": "json_object"},
-    )
-
-    response_text = response.choices[0].message.content.strip()
-    return json.loads(response_text)
-
-
-# ── Query Rewriting ──────────────────────────────────────
-
 REWRITER_PROMPT = """\
 You are an expert Islamic theologian acting as a search engine librarian.
 Your task is to take a conversational user query and chat history, and rewrite it into a highly efficient, token-optimized, and highly accurate standalone search string.
@@ -230,26 +59,90 @@ Rules:
 5. ONLY output the bare optimized search string.
 """
 
+# Known conversational prefixes the model may hallucinate before the search string
+_REWRITER_PREFIXES = ["Here is the", "Search string:", "Rewritten:", "Optimized:"]
+
+
+# ── Source Formatting ─────────────────────────────────────
+
+def _format_chunks_for_prompt(chunks: list[dict]) -> str:
+    """Format retrieved chunks as numbered source blocks for the prompt."""
+    source_blocks = []
+    for i, chunk in enumerate(chunks, 1):
+        meta = chunk.get("metadata", {})
+        book    = meta.get("book_name", "Unknown")
+        chapter = meta.get("chapter", "")
+        page    = meta.get("page_number", "")
+        volume  = meta.get("volume", "")
+
+        header = f"[SOURCE {i}]"
+        if book:    header += f" [BOOK: {book}]"
+        if volume:  header += f" [VOLUME: {volume}]"
+        if chapter: header += f" [CHAPTER: {chapter}]"
+        if page:    header += f" [PAGE: {page}]"
+
+        source_blocks.append(f"{header}\n{chunk['text']}\n[END SOURCE {i}]")
+
+    return "\n\n".join(source_blocks)
+
+
+def _build_user_message(query: str, sources_text: str) -> str:
+    """Build the shared user-turn message injected into every generation call."""
+    return (
+        f"Here are the SOURCE documents you MUST use to answer:\n\n{sources_text}\n\n---\n\n"
+        f"USER QUERY: {query}\n\n"
+        f"Remember: Answer using ONLY the sources above. Respond in the required JSON format. Maintain the persona voice."
+    )
+
+
+# ── Generation ────────────────────────────────────────────
+
+def _generate_openrouter(query: str, sources_text: str, system_prompt: str,
+                         conversation_history: list[dict] = None) -> dict:
+    """Generate answer using OpenRouter."""
+    client = _get_openrouter_client()
+
+    messages = [{"role": "system", "content": system_prompt}]
+    if conversation_history:
+        for turn in conversation_history:
+            role = "user" if turn["role"] == "user" else "assistant"
+            messages.append({"role": role, "content": turn["content"]})
+
+    messages.append({"role": "user", "content": _build_user_message(query, sources_text)})
+
+    response = client.chat.completions.create(
+        model=config.OPENROUTER_MODEL,
+        messages=messages,
+        temperature=config.TEMPERATURE,
+        max_tokens=config.MAX_OUTPUT_TOKENS,
+        response_format={"type": "json_object"},
+    )
+    return json.loads(response.choices[0].message.content.strip())
+
+
+# ── Query Rewriting ───────────────────────────────────────
+
 def rewrite_query(query: str, conversation_history: list[dict] = None) -> str:
-    """Rewrite conversational queries into dense search strings."""
+    """
+    Rewrite a conversational query into a dense, context-aware search string.
+    Uses the fast REWRITER_MODEL via OpenRouter.
+    Falls back to the original query on any error.
+    """
     if not conversation_history:
-        return query  # Nothing to contextualize if it's the first question
-    
-    # We only care about the last few turns
+        return query  # No prior context to resolve
+
+    # Build a concise history string from the last 4 turns (truncated to avoid prompt bloat)
     history_str = ""
     for turn in conversation_history[-4:]:
         role = "User" if turn["role"] == "user" else "Al-Ghazali"
-        # Truncate AI answers so prompt doesn't get too bloated
         content = turn["content"][:300] + "..." if len(turn["content"]) > 300 else turn["content"]
         history_str += f"{role}: {content}\n"
-        
-    user_prompt = f"""CHAT HISTORY:
-{history_str}
 
-CURRENT USER QUERY:
-{query}
-
-Rewrite the CURRENT USER QUERY into a highly specific standalone search string based on the context above."""
+    user_prompt = (
+        f"CHAT HISTORY:\n{history_str}\n\n"
+        f"CURRENT USER QUERY:\n{query}\n\n"
+        f"Rewrite the CURRENT USER QUERY into a highly specific standalone search string based on the context above."
+    )
 
     try:
         client = _get_openrouter_client()
@@ -262,15 +155,21 @@ Rewrite the CURRENT USER QUERY into a highly specific standalone search string b
             temperature=0.0,
             max_tokens=60,
         )
-        rewritten = response.choices[0].message.content.strip()
-        
-        # Fallback cleanup if the model hallucinates a conversational prefix
-        for prefix in ["Here is the", "Search string:", "Rewritten:", "Optimized:"]:
-            if rewritten.lower().startswith(prefix.lower()):
-                rewritten = rewritten[len(prefix):].strip()
-        
-        # Remove quotes if the model wrapped the output
+        raw_content = response.choices[0].message.content
+        if not raw_content:
+            print("  ⚠ Rewriter returned empty content. Falling back.")
+            return query
+
+        rewritten = raw_content.strip()
+
+        # Strip any conversational prefix the model may have hallucinated
+        matched = next((p for p in _REWRITER_PREFIXES if rewritten.lower().startswith(p.lower())), None)
+        if matched:
+            rewritten = rewritten[len(matched):].strip()
+
+        # Remove surrounding quotes if the model wrapped its output
         rewritten = rewritten.strip('"\'')
+
         print(f"  🔄 Rewritten query: '{rewritten}' (Original: '{query}')")
         return rewritten
 
@@ -279,7 +178,7 @@ Rewrite the CURRENT USER QUERY into a highly specific standalone search string b
         return query
 
 
-# ── Public API ───────────────────────────────────────────
+# ── Public API ────────────────────────────────────────────
 
 def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str,
                     conversation_history: list[dict] = None) -> dict:
@@ -287,21 +186,21 @@ def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str
     Generate a persona-voiced answer grounded in source chunks.
 
     Args:
-        query: User's question
-        retrieved_chunks: Chunks from vector store search
-        system_prompt: The detailed persona ruleset
-        conversation_history: Previous turns for context (optional)
+        query: The original user question (not the rewritten search string).
+        retrieved_chunks: Chunks from vector store search.
+        system_prompt: The complete persona ruleset.
+        conversation_history: Previous turns for conversational context (optional).
 
     Returns:
-        Parsed JSON response dict with: can_answer, answer_text, citations[], etc.
+        Parsed JSON dict with: can_answer, answer_text, citations[], follow_up, closing.
     """
     sources_text = _format_chunks_for_prompt(retrieved_chunks)
 
-    # ── Input Length Enforcement ─────────────────────────────
-    # Approximation: 4 chars ≈ 1 token (conservative for mixed Arabic/English)
+    # ── Input Length Guard ────────────────────────────────
+    # Conservative token estimate: 4 chars ≈ 1 token (tuned for mixed Arabic/English)
     full_prompt_len = len(query) + len(sources_text) + len(system_prompt)
     if conversation_history:
-        full_prompt_len += sum(len(turn["content"]) for turn in conversation_history)
+        full_prompt_len += sum(len(t["content"]) for t in conversation_history)
 
     estimated_tokens = full_prompt_len // 4
     if estimated_tokens > config.MAX_INPUT_TOKENS:
@@ -309,25 +208,20 @@ def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str
         return _empty_response()
 
     try:
-        if config.LLM_PROVIDER == "claude":
-            result = _generate_claude(query, sources_text, system_prompt, conversation_history)
-        elif config.LLM_PROVIDER == "openrouter":
-            result = _generate_openrouter(query, sources_text, system_prompt, conversation_history)
-        else:
-            result = _generate_gemini(query, sources_text, system_prompt, conversation_history)
+        result = _generate_openrouter(query, sources_text, system_prompt, conversation_history)
 
-        # ── Normalize Response ───────────────────────────────────
-        # Handle variations in field names from different models (Nemotron uses 'response' or 'answer')
+        # ── Normalize field aliases from different model outputs ──
+        # Some models return "answer" or "response" instead of "answer_text"
         if "answer" in result and not result.get("answer_text"):
             result["answer_text"] = result["answer"]
         if "response" in result and not result.get("answer_text"):
             result["answer_text"] = result["response"]
-            
+
+        # If the model answered but forgot to set the boolean, infer it
         if result.get("answer_text") and not result.get("can_answer"):
-            # If the model gave an answer but forgot to set the boolean
             result["can_answer"] = True
 
-        # Ensure required fields exist
+        # Guarantee all required fields are present
         result.setdefault("can_answer", False)
         result.setdefault("answer_mode", "elaborated")
         result.setdefault("quote_primary", "")
@@ -343,16 +237,17 @@ def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str
         return _empty_response()
 
     except Exception as e:
-        print(f"  ✗ LLM API error ({config.LLM_PROVIDER}): {e}")
+        print(f"  ✗ LLM API error: {e}")
         return _empty_response()
 
 
 def verify_answer(retrieved_chunks: list[dict], generated_answer: dict) -> bool:
     """
-    Verification pass: checks if the generated answer is grounded in sources.
+    Verification pass: checks whether the generated answer is grounded in sources
+    and free of anachronisms (post-505 AH references).
 
-    Returns:
-        True if grounded (no hallucination), False if hallucination detected
+    Uses the fast REWRITER_MODEL to minimize pipeline latency.
+    Returns True (grounded) or False (hallucination detected).
     """
     if not config.ENABLE_VERIFICATION:
         return True
@@ -360,54 +255,25 @@ def verify_answer(retrieved_chunks: list[dict], generated_answer: dict) -> bool:
     sources_text = _format_chunks_for_prompt(retrieved_chunks)
     answer_text = json.dumps(generated_answer, indent=2, ensure_ascii=False)
 
-    verification_message = f"""SOURCE_CHUNKS:
-{sources_text}
-
----
-
-GENERATED_ANSWER:
-{answer_text}
-
-Does the GENERATED_ANSWER contain any claims not in the SOURCE_CHUNKS? Respond in JSON."""
+    verification_message = (
+        f"SOURCE_CHUNKS:\n{sources_text}\n\n---\n\n"
+        f"GENERATED_ANSWER:\n{answer_text}\n\n"
+        f"Does the GENERATED_ANSWER contain any claims not in the SOURCE_CHUNKS? Respond in JSON."
+    )
 
     try:
-        if config.LLM_PROVIDER == "claude":
-            client = _get_anthropic_client()
-            response = client.messages.create(
-                model=config.CLAUDE_MODEL,
-                max_tokens=256,
-                temperature=0.0,
-                system=VERIFIER_PROMPT,
-                messages=[{"role": "user", "content": verification_message}],
-            )
-            response_text = response.content[0].text.strip()
-        elif config.LLM_PROVIDER == "openrouter":
-            client = _get_openrouter_client()
-            response = client.chat.completions.create(
-                model=config.REWRITER_MODEL,
-                temperature=0.0,
-                max_tokens=256,
-                messages=[
-                    {"role": "system", "content": VERIFIER_PROMPT},
-                    {"role": "user", "content": verification_message}
-                ],
-                response_format={"type": "json_object"},
-            )
-            response_text = response.choices[0].message.content.strip()
-        else:
-            from google.genai import types
-            client = _get_gemini_client()
-            response = client.models.generate_content(
-                model=config.GEMINI_MODEL,
-                contents=[{"role": "user", "parts": [{"text": verification_message}]}],
-                config=types.GenerateContentConfig(
-                    system_instruction=VERIFIER_PROMPT,
-                    temperature=0.0,
-                    max_output_tokens=256,
-                    response_mime_type="application/json",
-                ),
-            )
-            response_text = (response.text or "").strip()
+        client = _get_openrouter_client()
+        response = client.chat.completions.create(
+            model=config.REWRITER_MODEL,
+            temperature=0.0,
+            max_tokens=256,
+            messages=[
+                {"role": "system", "content": VERIFIER_PROMPT},
+                {"role": "user", "content": verification_message}
+            ],
+            response_format={"type": "json_object"},
+        )
+        response_text = (response.choices[0].message.content or "").strip()
 
         if not response_text:
             print("  ⚠ Verification returned empty — passing by default")
@@ -429,14 +295,11 @@ Does the GENERATED_ANSWER contain any claims not in the SOURCE_CHUNKS? Respond i
 
 
 def _empty_response() -> dict:
-    """Return a blank response dict."""
-    refusal = "I cannot address this matter."
-    closing = ""
-
+    """Return a safe blank response dict when generation fails."""
     return {
         "can_answer": False,
-        "answer_text": refusal,
+        "answer_text": "I cannot address this matter.",
         "citations": [],
         "follow_up": "",
-        "closing": closing,
+        "closing": "",
     }

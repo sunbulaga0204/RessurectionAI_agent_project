@@ -131,7 +131,7 @@ OUTPUT RULES — STRICT
 • TOTAL response (answer_text + citations combined) MUST NOT exceed 300 words.
 • answer_text must be one focused paragraph in the persona's voice.
 • Lead with the single strongest quote from the sources, then elaborate in 2-3 sentences maximum.
-• Citation format: only "book_title" and "page_number". Omit chapter and full quote fields.
+• Citation format: include "book_title", "volume" (if present in source), and "page_number". Omit chapter and full quote fields.
 • Do NOT pad with summaries, lists, or meta-commentary.
 • IMPORTANT FORMATTING: Any Arabic text MUST be isolated on its own line. Always insert a double newline (\n\n) before and after any Arabic words or quotes to prevent right-to-left text from mixing with English.
 • closing field: one short sentence only.
@@ -147,6 +147,7 @@ Respond ONLY in this compact JSON:
   "citations": [
     {{
       "book": "Short book title",
+      "volume": "Vol. X (if applicable)",
       "page_number": "p. X"
     }}
   ],

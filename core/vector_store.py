@@ -249,8 +249,7 @@ def _embed_texts(texts: List[str], input_type: str = "document") -> List[List[fl
     res = client.embed(
         texts,
         model=config.EMBEDDING_MODEL,
-        input_type=input_type,
-        output_dimension=config.VOYAGE_OUTPUT_DIMENSION
+        input_type=input_type
     )
     return res.embeddings
 

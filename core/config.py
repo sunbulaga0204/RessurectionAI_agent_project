@@ -1,7 +1,7 @@
 """
 Configuration for the Resurrection Agent.
 Reads settings from environment variables / .env file.
-Supports dual LLM providers (Gemini / Claude).
+Single LLM provider: OpenRouter (routes to any model via a unified API).
 Embedding: Voyage AI (voyage-4-lite).
 """
 
@@ -10,13 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── LLM Provider ─────────────────────────────────────────
-# "gemini", "claude", or "openrouter"
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").lower()
-
 # ── API Keys ─────────────────────────────────────────────
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
@@ -24,10 +18,10 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
 
 # ── Vector Store ─────────────────────────────────────────
-# "chroma" (local) or "postgres" (cloud/Railway)
+# "chroma" (local dev) or "postgres" (cloud/Railway production)
 VECTOR_STORE_TYPE = os.getenv("VECTOR_STORE_TYPE", "chroma").lower()
 CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma_db")
-DATABASE_URL = os.getenv("DATABASE_URL", "") # For Railway PostgreSQL
+DATABASE_URL = os.getenv("DATABASE_URL", "")  # Required for Railway PostgreSQL
 
 # ── Paths ────────────────────────────────────────────────
 SOURCES_DIR = os.getenv("SOURCES_DIR", "./sources")
@@ -44,15 +38,19 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "100"))
 TOP_K = int(os.getenv("TOP_K", "8"))
 
 # ── Model Settings ───────────────────────────────────────
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Main generation model — large, high-quality (paid tier)
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b")
+# Rewriter & Verifier model — small, fast (used for pre-search and fact-checking)
 REWRITER_MODEL = os.getenv("REWRITER_MODEL", "nvidia/nemotron-nano-9b-v2")
+# Embedding model via Voyage AI
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "voyage-4-lite")
-# MRL output dimension: 256 | 512 | 1024 | 2048
+# NOTE: VOYAGE_OUTPUT_DIMENSION is intentionally not passed to the Voyage client.
+# The voyageai SDK v0.2.4 does not support the output_dimension parameter.
+# If upgrading the SDK in future, re-enable this in vector_store._embed_texts().
 VOYAGE_OUTPUT_DIMENSION = int(os.getenv("VOYAGE_OUTPUT_DIMENSION", "1024"))
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
-MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "750"))
+MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "1200"))
 MAX_INPUT_TOKENS = int(os.getenv("MAX_INPUT_TOKENS", "128000"))
 
 # ── Verification ─────────────────────────────────────────

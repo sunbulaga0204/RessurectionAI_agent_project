@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -27,10 +26,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize core services on startup."""
-    print("\n🗄️  Connecting to ChromaDB SaaS Node...")
+    store_type = config.VECTOR_STORE_TYPE.capitalize()
+    print(f"\n🗄️  Initializing {store_type} Vector Store...")
     vector_store.initialize()
     yield
-    print("\n👋 SaaS Core Node shutting down...")
+    print("\n👋 Resurrection Agent shutting down...")
 
 
 # ── App ──────────────────────────────────────────────────
@@ -60,15 +60,17 @@ class ChatRequest(BaseModel):
 
 class Citation(BaseModel):
     book: str = ""
-    chapter: str = ""   # may be omitted by the LLM; defaults to empty
+    volume: str = ""   # e.g. "Vol. 1" for multi-volume works like the Ihya'
+    chapter: str = ""  # may be omitted by the LLM
     page_number: str = ""
-    quote: str = ""    # may be omitted by the LLM; defaults to empty
+    quote: str = ""    # may be omitted by the LLM
 
     @classmethod
     def from_llm(cls, data: dict) -> "Citation":
         """Construct from LLM output, coercing None fields to empty strings."""
         return cls(
             book=data.get("book") or "",
+            volume=str(data.get("volume") or ""),
             chapter=data.get("chapter") or "",
             page_number=str(data.get("page_number") or ""),
             quote=data.get("quote") or "",
@@ -178,11 +180,11 @@ async def chat(tenant_id: str, req: ChatRequest):
         session_manager.cleanup_expired()
 
         return ChatResponse(
-            answer_text=result.get("answer_text", ""),
-            can_answer=result.get("can_answer", False),
-            citations=[Citation.from_llm(c) for c in result.get("citations", [])],
-            follow_up=result.get("follow_up", ""),
-            closing=result.get("closing", ""),
+            answer_text=result["answer_text"],
+            can_answer=result["can_answer"],
+            citations=[Citation.from_llm(c) for c in result["citations"]],
+            follow_up=result["follow_up"],
+            closing=result["closing"],
             session_id=session_id,
         )
 

@@ -60,42 +60,43 @@ def _escape_md(text: str) -> str:
 
 def _detect_language(text: str) -> str:
     """
-    Detect whether the user's message is in Indonesian, Malay, or English.
+    Detect whether the user's message is in Indonesian, Malay, or English/Arabic.
     Returns one of: 'Indonesian', 'Malay', 'Arabic', 'English'.
     Uses vocabulary heuristics — no external libraries needed.
     """
     t = text.lower()
 
-    # Common Indonesian markers (words not found or rare in Malay)
+    # Arabic detection: any Arabic Unicode character (U+0600–U+06FF)
+    # This handles single Arabic terms embedded in English (e.g. 'what is توكل?')
+    arabic_char_count = sum(1 for c in text if '\u0600' <= c <= '\u06ff')
+    if arabic_char_count >= 1:
+        return 'Arabic'
+
+    # Common Indonesian markers
     id_markers = [
         'apa', 'bagaimana', 'kenapa', 'mengapa', 'jelaskan', 'ceritakan',
         'tolong', 'saya', 'adalah', 'dengan', 'tidak', 'sudah', 'bisa',
         'dalam', 'untuk', 'yang', 'itu', 'ini', 'juga', 'seperti',
-        'menurut', 'tentang', 'apakah', 'bagaimana', 'bahwa',
+        'menurut', 'tentang', 'apakah', 'bahwa',
     ]
-    # Common Malay markers (words not found or rare in Indonesian)
+    # Common Malay markers
     my_markers = [
         'apa', 'bagaimana', 'kenapa', 'mengapa', 'jelaskan', 'ceritakan',
         'tolong', 'saya', 'ialah', 'dengan', 'tidak', 'sudah', 'boleh',
         'dalam', 'untuk', 'yang', 'itu', 'ini', 'juga', 'seperti',
         'menurut', 'tentang', 'adakah', 'bagaimanakah', 'bahawa',
     ]
-    # Arabic markers
-    arabic_markers = ['ما', 'كيف', 'لماذا', 'من', 'هل', 'اشرح']
 
     id_score = sum(1 for w in id_markers if w in t.split())
     my_score = sum(1 for w in my_markers if w in t.split())
-    ar_score = sum(1 for w in arabic_markers if w in t)
 
     # Malay-specific differentiators
     if any(w in t for w in ['bahawa', 'adakah', 'bagaimanakah', 'boleh', 'ialah']):
         my_score += 3
-    # Indonesian-specific differentiators  
+    # Indonesian-specific differentiators
     if any(w in t for w in ['bahwa', 'apakah', 'bisa', 'adalah', 'kenapa']):
         id_score += 3
 
-    if ar_score >= 2:
-        return 'Arabic'
     if id_score == 0 and my_score == 0:
         return 'English'
     if my_score > id_score:
@@ -132,9 +133,12 @@ def _format_response(result: dict) -> str:
     if citations:
         parts.append(f"\n📖 *Sources:*")
         for i, c in enumerate(citations, 1):
-            book = _escape_md(c.get("book", "Unknown"))
-            page = _escape_md(str(c.get("page_number", "")))
+            book   = _escape_md(c.get("book", "Unknown"))
+            volume = _escape_md(str(c.get("volume", "")))
+            page   = _escape_md(str(c.get("page_number", "")))
             line = f"\\[{i}\\] *{book}*"
+            if volume:
+                line += f", {volume}"
             if page:
                 line += f", {page}"
             parts.append(line)
@@ -145,13 +149,18 @@ def _format_response(result: dict) -> str:
 
     return "\n".join(parts)
 
+
+async def _try_send(update: Update, text: str):
+    """Send a Telegram message with MarkdownV2; fall back to plain text on parse error."""
+    try:
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+    except Exception:
+        await update.message.reply_text(text)
+
 async def _send_long(update: Update, text: str):
-    """Send a message, splitting if it exceeds Telegram's limit."""
+    """Send a message, splitting into chunks if it exceeds Telegram's 4096 char limit."""
     if len(text) <= TELEGRAM_MAX_LENGTH:
-        try:
-            await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
-        except Exception:
-            await update.message.reply_text(text)
+        await _try_send(update, text)
         return
 
     sections = text.split("\n\n")
@@ -162,16 +171,10 @@ async def _send_long(update: Update, text: str):
             current = candidate
         else:
             if current:
-                try:
-                    await update.message.reply_text(current, parse_mode=ParseMode.MARKDOWN_V2)
-                except Exception:
-                    await update.message.reply_text(current)
+                await _try_send(update, current)
             current = section
     if current:
-        try:
-            await update.message.reply_text(current, parse_mode=ParseMode.MARKDOWN_V2)
-        except Exception:
-            await update.message.reply_text(current)
+        await _try_send(update, current)
 
 
 # ── Commands ─────────────────────────────────────────────
