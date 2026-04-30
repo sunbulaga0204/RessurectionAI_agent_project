@@ -41,7 +41,7 @@ TOP_K = int(os.getenv("TOP_K", "8"))
 # Main generation model — large, high-quality (paid tier)
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b")
 # Rewriter & Verifier model — small, fast (used for pre-search and fact-checking)
-REWRITER_MODEL = os.getenv("REWRITER_MODEL", "nvidia/nemotron-nano-9b-v2")
+REWRITER_MODEL = os.getenv("REWRITER_MODEL", "meta-llama/llama-3.2-3b-instruct")
 # Embedding model via Voyage AI
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "voyage-4-lite")
 # NOTE: VOYAGE_OUTPUT_DIMENSION is intentionally not passed to the Voyage client.
