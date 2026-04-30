@@ -219,14 +219,15 @@ Remember: Answer using ONLY the sources above. Respond in the required JSON form
 
 REWRITER_PROMPT = """\
 You are an expert Islamic theologian acting as a search engine librarian.
-Your task is to take a conversational user query and chat history, and rewrite it into a dense, standalone search string.
+Your task is to take a conversational user query and chat history, and rewrite it into a highly efficient, token-optimized, and highly accurate standalone search string.
 The output will be embedded into vectors and matched against classical Arabic theological texts.
 
 Rules:
 1. Translate casual pronouns ("it", "he", "this concept") into the actual subject from the chat history.
 2. If the user uses slang or modern terms, include the formal Arabic equivalent (e.g., "heart" -> "Qalb", "logic" -> "Mantiq").
 3. DO NOT output conversational filler. No "Here is the query" or "Search string:".
-4. ONLY output the bare optimized search string.
+4. Optimize for token efficiency: eliminate redundant words while preserving maximum semantic accuracy.
+5. ONLY output the bare optimized search string.
 """
 
 def rewrite_query(query: str, conversation_history: list[dict] = None) -> str:
@@ -383,7 +384,7 @@ Does the GENERATED_ANSWER contain any claims not in the SOURCE_CHUNKS? Respond i
         elif config.LLM_PROVIDER == "openrouter":
             client = _get_openrouter_client()
             response = client.chat.completions.create(
-                model=config.OPENROUTER_MODEL,
+                model=config.REWRITER_MODEL,
                 temperature=0.0,
                 max_tokens=256,
                 messages=[
