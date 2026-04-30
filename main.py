@@ -32,22 +32,18 @@ def main():
     print("  🚀  Resurrection Agent — SaaS Core API Started")
     print("=" * 60)
 
-    # Validate API keys
-    if config.LLM_PROVIDER == "claude":
-        if not config.ANTHROPIC_API_KEY:
-            print("\n✗ ANTHROPIC_API_KEY not set (LLM_PROVIDER=claude)")
-            sys.exit(1)
-    elif config.LLM_PROVIDER == "openrouter":
-        if not config.OPENROUTER_API_KEY:
-            print("\n✗ OPENROUTER_API_KEY not set (LLM_PROVIDER=openrouter)")
-            sys.exit(1)
-    else:
-        if not config.GEMINI_API_KEY:
-            print("\n✗ GEMINI_API_KEY not set. Create a .env file from .env.example")
-            sys.exit(1)
+    # Validate required API keys (OpenRouter is the single LLM provider)
+    if not config.OPENROUTER_API_KEY:
+        print("\n✗ OPENROUTER_API_KEY not set. Add it to your .env file.")
+        sys.exit(1)
+
+    if not config.VOYAGE_API_KEY:
+        print("\n✗ VOYAGE_API_KEY not set. Required for embeddings.")
+        sys.exit(1)
 
     # Prepare vector store client (lazy load on requests)
-    print("\n🗄️  Connecting to ChromaDB Engine...")
+    store_type = config.VECTOR_STORE_TYPE.capitalize()
+    print(f"\n🗄️  Initializing {store_type} Vector Store...")
     vector_store.initialize()
 
     # ── Start Telegram Bot ─────────────────────────────────────
@@ -69,16 +65,13 @@ def main():
 
     # Print config summary
     print(f"\n⚙️  Configuration:")
-    print(f"  LLM Provider:    {config.LLM_PROVIDER}")
-    if config.LLM_PROVIDER == "claude":
-        print(f"  Model:           {config.CLAUDE_MODEL}")
-    elif config.LLM_PROVIDER == "openrouter":
-        print(f"  Model:           {config.OPENROUTER_MODEL}")
-    else:
-        print(f"  Model:           {config.GEMINI_MODEL}")
+    print(f"  Provider:        OpenRouter")
+    print(f"  Generator:       {config.OPENROUTER_MODEL}")
+    print(f"  Rewriter:        {config.REWRITER_MODEL}")
     print(f"  Embeddings:      {config.EMBEDDING_MODEL}")
     print(f"  Top-K retrieval: {config.TOP_K}")
     print(f"  Temperature:     {config.TEMPERATURE}")
+    print(f"  Max Tokens:      {config.MAX_OUTPUT_TOKENS}")
     print(f"  Verification:    {'Enabled' if config.ENABLE_VERIFICATION else 'Disabled'}")
     print(f"  Session TTL:     {config.SESSION_TTL_HOURS}h")
 
