@@ -67,7 +67,7 @@ def main():
     print(f"\n⚙️  Configuration:")
     print(f"  Provider:        OpenRouter")
     print(f"  Generator:       {config.OPENROUTER_MODEL}")
-    print(f"  Rewriter:        {config.REWRITER_MODEL}")
+    print(f"  Router:          {config.ROUTER_MODEL}")
     print(f"  Embeddings:      {config.EMBEDDING_MODEL}")
     print(f"  Top-K retrieval: {config.TOP_K}")
     print(f"  Temperature:     {config.TEMPERATURE}")

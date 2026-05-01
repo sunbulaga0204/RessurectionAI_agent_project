@@ -40,8 +40,9 @@ TOP_K = int(os.getenv("TOP_K", "8"))
 # ── Model Settings ───────────────────────────────────────
 # Main generation model — large, high-quality (paid tier)
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b")
-# Rewriter & Verifier model — small, fast (used for pre-search and fact-checking)
-REWRITER_MODEL = os.getenv("REWRITER_MODEL", "meta-llama/llama-3.2-3b-instruct")
+# Router & Verifier model — small, fast (used for intent routing and fact-checking)
+ROUTER_MODEL = os.getenv("ROUTER_MODEL", "meta-llama/llama-3.2-3b-instruct")
+REWRITER_MODEL = ROUTER_MODEL  # Legacy alias until codebase is fully migrated to Router
 # Embedding model via Voyage AI
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "voyage-4-lite")
 # NOTE: VOYAGE_OUTPUT_DIMENSION is intentionally not passed to the Voyage client.
@@ -60,6 +61,11 @@ ENABLE_VERIFICATION = os.getenv("ENABLE_VERIFICATION", "true").lower() == "true"
 # Voyage supports batches of up to 128 texts with no free-tier throttling
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "128"))
 EMBED_DELAY_SECONDS = float(os.getenv("EMBED_DELAY_SECONDS", "0"))
+
+# ── Router Settings ──────────────────────────────────────
+# Expand the context window so the Router doesn't lose context
+ROUTER_HISTORY_TURNS = int(os.getenv("ROUTER_HISTORY_TURNS", "6"))
+ROUTER_TURN_MAX_CHARS = int(os.getenv("ROUTER_TURN_MAX_CHARS", "600"))
 
 # ── Session Memory ───────────────────────────────────────
 SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "24"))

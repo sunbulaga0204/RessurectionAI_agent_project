@@ -106,20 +106,6 @@ def _detect_language(text: str) -> str:
     return 'English'
 
 
-def _add_language_instruction(prompt: str, language: str) -> str:
-    """Append a language override rule to the end of the system prompt."""
-    if language == 'English':
-        return prompt  # default — no injection needed
-    lang_instruction = (
-        f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"LANGUAGE OVERRIDE — HIGHEST PRIORITY\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"The user has written in {language}. You MUST write your "
-        f"answer_text and closing entirely in {language}. "
-        f"Book titles and Arabic terms may remain in their original script. "
-        f"Do NOT switch to English in your response."
-    )
-    return prompt + lang_instruction
 
 def _format_response(result: dict) -> str:
     """Format the compact API JSON response into a Telegram message."""
@@ -278,15 +264,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Error loading persona memory.")
         return
 
-    # Detect user language and inject an override instruction into the prompt
+    # Log detected language for diagnostics (Router handles enforcement server-side)
     detected_lang = _detect_language(query)
-    if detected_lang != 'English':
-        logger.info(f"Language detected: {detected_lang}")
-    prompt_with_lang = _add_language_instruction(prompt, detected_lang)
+    logger.info(f"Language detected (client-side heuristic): {detected_lang}")
 
     payload = {
         "query": query,
-        "system_prompt": prompt_with_lang,
+        "system_prompt": prompt,
         "death_date_ah": DEATH_DATE_AH,
         "session_id": telegram_user_id
     }

@@ -1,6 +1,6 @@
 """
 LLM Client — OpenRouter-only abstraction.
-Handles query rewriting (fast model), answer generation (large model),
+Handles intent routing (fast model), answer generation (large model),
 and hallucination + anachronism verification (fast model).
 """
 
@@ -37,30 +37,37 @@ You are a fact-checking engine. You will receive:
 Your task is to ensure the GENERATED_ANSWER is grounded in the SOURCE_CHUNKS.
 
 Rules:
-- The answer may draw philosophical parallels or bridge concepts, provided the core themes and cited quotes exist in the SOURCE_CHUNKS.
 - Ensure that any direct quote in the answer is a valid substring of a SOURCE_CHUNK.
-- Flag as hallucinated ONLY if the answer invents historical facts, completely fabricates quotes, or makes claims that directly contradict the provided sources.
-- Do NOT flag the answer as hallucinated just because it uses a conversational or philosophical tone.
+- The answer MAY bridge to a related concept if the exact term is absent from sources, BUT ONLY if it explicitly states the gap (e.g. "This exact term does not appear in my works, but..."). Flag as hallucinated if the answer silently substitutes a different concept without this disclosure.
+- Flag as hallucinated if the answer invents historical facts, completely fabricates quotes, or makes claims that directly contradict the provided sources.
+- Do NOT flag the answer as hallucinated solely because it uses a conversational or philosophical tone.
+- TERMINOLOGY CHECK: If the user query in the GENERATED_ANSWER's context contains a specific Arabic or classical term, verify the answer either (a) directly addresses that term from the sources, or (b) explicitly acknowledges the term is absent and names the nearest related concept. Flag as hallucinated if neither condition is met.
 - ANACHRONISM CHECK: Flag as hallucinated if the answer mentions any person, event, or invention that occurred AFTER 505 AH / 1111 CE (e.g. mentions of Ibn Taymiyya, Rumi, modern science, or later history).
 
 Respond in JSON:
 {"hallucinated": true/false, "reason": "Brief explanation"}"""
 
-REWRITER_PROMPT = """\
-You are an expert Islamic theologian acting as a search engine librarian.
-Your task is to take a conversational user query and chat history, and rewrite it into a highly efficient, token-optimized, and highly accurate standalone search string.
-The output will be embedded into vectors and matched against classical Arabic theological texts.
+ROUTER_PROMPT = """\
+You are a query analysis engine for a classical Islamic text search system.
+Analyze the user's query and chat history, then output a JSON object.
 
-Rules:
-1. Translate casual pronouns ("it", "he", "this concept") into the actual subject from the chat history.
-2. If the user uses slang or modern terms, include the formal Arabic equivalent (e.g., "heart" -> "Qalb", "logic" -> "Mantiq").
-3. DO NOT output conversational filler. No "Here is the query" or "Search string:".
-4. Optimize for token efficiency: eliminate redundant words while preserving maximum semantic accuracy.
-5. ONLY output the bare optimized search string.
+JSON schema:
+{"intent": "casual|terminology|general_question", "language": "<detected language>", "search_string": "<concise search string>", "requires_rag": true/false}
+
+Rules for search_string:
+1. Replace pronouns ("it", "he", "this concept") with the actual subject from chat history.
+2. If the user used a specific Arabic/Persian term (e.g. فناء, tawakkul, kashf), PRESERVE it exactly. Do NOT translate or paraphrase it.
+3. If the user used a vague modern concept without a classical term, you MAY append the likely equivalent in parentheses — e.g. "intuition (kashf?)".
+4. Keep the user's original language context. Do NOT rewrite an Indonesian query into pure Arabic.
+5. Remove filler words but preserve all semantic meaning.
+
+Rules for intent:
+- "casual": greetings, small talk, "who are you", "thank you" → requires_rag=false
+- "terminology": user asks about a SPECIFIC Arabic/classical term → requires_rag=true
+- "general_question": broad thematic questions → requires_rag=true
+
+Output ONLY the JSON object.
 """
-
-# Known conversational prefixes the model may hallucinate before the search string
-_REWRITER_PREFIXES = ["Here is the", "Search string:", "Rewritten:", "Optimized:"]
 
 
 # ── Source Formatting ─────────────────────────────────────
@@ -120,62 +127,81 @@ def _generate_openrouter(query: str, sources_text: str, system_prompt: str,
     return json.loads(response.choices[0].message.content.strip())
 
 
-# ── Query Rewriting ───────────────────────────────────────
+# ── Intent Routing ────────────────────────────────────────
 
-def rewrite_query(query: str, conversation_history: list[dict] = None) -> str:
+def analyze_intent(query: str, conversation_history: list[dict] = None) -> dict:
     """
-    Rewrite a conversational query into a dense, context-aware search string.
-    Uses the fast REWRITER_MODEL via OpenRouter.
-    Falls back to the original query on any error.
+    Analyze the user's query to determine intent, language, and search strategy.
+    Uses the fast ROUTER_MODEL via OpenRouter with structured JSON output.
+    Returns a dict with: intent, language, search_string, requires_rag.
     """
-    if not conversation_history:
-        return query  # No prior context to resolve
+    default_result = {
+        "intent": "general_question",
+        "language": "English",
+        "search_string": query,
+        "requires_rag": True,
+    }
 
-    # Build a concise history string from the last 4 turns (truncated to avoid prompt bloat)
+    # Build history context if available
     history_str = ""
-    for turn in conversation_history[-4:]:
-        role = "User" if turn["role"] == "user" else "Al-Ghazali"
-        content = turn["content"][:300] + "..." if len(turn["content"]) > 300 else turn["content"]
-        history_str += f"{role}: {content}\n"
+    if conversation_history:
+        for turn in conversation_history[-config.ROUTER_HISTORY_TURNS:]:
+            role = "User" if turn["role"] == "user" else "Assistant"
+            max_chars = config.ROUTER_TURN_MAX_CHARS
+            content = turn["content"][:max_chars] + "..." if len(turn["content"]) > max_chars else turn["content"]
+            history_str += f"{role}: {content}\n"
 
-    user_prompt = (
-        f"CHAT HISTORY:\n{history_str}\n\n"
-        f"CURRENT USER QUERY:\n{query}\n\n"
-        f"Rewrite the CURRENT USER QUERY into a highly specific standalone search string based on the context above."
-    )
+    user_prompt = f"CURRENT USER QUERY:\n{query}"
+    if history_str:
+        user_prompt = f"CHAT HISTORY:\n{history_str}\n\n{user_prompt}"
 
     try:
         client = _get_openrouter_client()
         response = client.chat.completions.create(
-            model=config.REWRITER_MODEL,
+            model=config.ROUTER_MODEL,
             messages=[
-                {"role": "system", "content": REWRITER_PROMPT},
-                {"role": "user", "content": user_prompt}
+                {"role": "system", "content": ROUTER_PROMPT},
+                {"role": "user", "content": user_prompt},
             ],
             temperature=0.0,
-            max_tokens=60,
+            max_tokens=150,
+            response_format={"type": "json_object"},
         )
-        raw_content = response.choices[0].message.content
-        if not raw_content:
-            print("  ⚠ Rewriter returned empty content. Falling back.")
-            return query
+        raw = response.choices[0].message.content
+        if not raw:
+            print("  ⚠ Router returned empty content. Using defaults.")
+            return default_result
 
-        rewritten = raw_content.strip()
+        result = json.loads(raw.strip())
 
-        # Strip any conversational prefix the model may have hallucinated
-        matched = next((p for p in _REWRITER_PREFIXES if rewritten.lower().startswith(p.lower())), None)
-        if matched:
-            rewritten = rewritten[len(matched):].strip()
+        # Validate and fill defaults for any missing fields
+        result.setdefault("intent", "general_question")
+        result.setdefault("language", "English")
+        result.setdefault("search_string", query)
+        result.setdefault("requires_rag", True)
 
-        # Remove surrounding quotes if the model wrapped its output
-        rewritten = rewritten.strip('"\'')
+        # Ensure search_string is never empty
+        if not result["search_string"].strip():
+            result["search_string"] = query
 
-        print(f"  🔄 Rewritten query: '{rewritten}' (Original: '{query}')")
-        return rewritten
+        print(f"  🧭 Router: intent={result['intent']}, lang={result['language']}, "
+              f"rag={result['requires_rag']}, search='{result['search_string']}'")
+        return result
 
     except Exception as e:
-        print(f"  ⚠ Rewriter error: {e}. Falling back to original query.")
-        return query
+        print(f"  ⚠ Router error: {e}. Using defaults.")
+        return default_result
+
+
+def rewrite_query(query: str, conversation_history: list[dict] = None) -> str:
+    """
+    Legacy wrapper around analyze_intent().
+    Returns only the search_string for backward compatibility with api.py.
+    """
+    if not conversation_history:
+        return query  # No prior context to resolve
+    result = analyze_intent(query, conversation_history)
+    return result.get("search_string", query)
 
 
 # ── Public API ────────────────────────────────────────────
@@ -246,7 +272,7 @@ def verify_answer(retrieved_chunks: list[dict], generated_answer: dict) -> bool:
     Verification pass: checks whether the generated answer is grounded in sources
     and free of anachronisms (post-505 AH references).
 
-    Uses the fast REWRITER_MODEL to minimize pipeline latency.
+    Uses the fast ROUTER_MODEL to minimize pipeline latency.
     Returns True (grounded) or False (hallucination detected).
     """
     if not config.ENABLE_VERIFICATION:
@@ -264,7 +290,7 @@ def verify_answer(retrieved_chunks: list[dict], generated_answer: dict) -> bool:
     try:
         client = _get_openrouter_client()
         response = client.chat.completions.create(
-            model=config.REWRITER_MODEL,
+            model=config.ROUTER_MODEL,
             temperature=0.0,
             max_tokens=256,
             messages=[

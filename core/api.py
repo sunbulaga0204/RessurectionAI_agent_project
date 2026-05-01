@@ -2,6 +2,11 @@
 API — FastAPI backend serving the RAG pipeline and web chatbot.
 Provides endpoints for chat, persona info, sources, and session export.
 Also serves the static web frontend.
+
+Pipeline flow:
+  analyze_intent (Router / fast model)
+    ├─ casual query → generate_direct_answer (120b, no RAG, no Verifier)
+    └─ rag query    → vector retrieval → generate_answer → verify_answer
 """
 
 import logging
@@ -97,7 +102,7 @@ class ExportRequest(BaseModel):
 @app.get("/api/health")
 async def health():
     """Health check."""
-    return {"status": "ok", "provider": config.LLM_PROVIDER}
+    return {"status": "ok", "provider": config.OPENROUTER_MODEL}
 
 
 @app.get("/api/persona")
@@ -117,23 +122,54 @@ async def sources(tenant_id: str):
 async def chat(tenant_id: str, req: ChatRequest):
     """
     SaaS Chat endpoint — runs the isolated RAG pipeline.
+
+    Flow:
+      1. analyze_intent  → determines intent, language, search_string, requires_rag
+      2a. casual intent  → generate_answer with no sources (fast path, no RAG/Verifier)
+      2b. rag intent     → vector retrieval → generate_answer → verify_answer
     """
     # Session management sandboxed by tenant
     session_id = session_manager.get_or_create_session(tenant_id, req.session_id)
     history = session_manager.get_history(session_id)
 
-    # Check if sources are ingested for this tenant
-    if not vector_store.is_ingested(tenant_id):
-        return ChatResponse(
-            answer_text="No source texts have been linked to this persona. The administrator needs to run the ingestion script.",
-            can_answer=False,
-            session_id=session_id,
-        )
-
     try:
-        # ── Rewrite Query (Contextualization) ────────────────────
-        # Optimize the search string using the chat history and Nemotron Nano
-        search_query = llm_client.rewrite_query(req.query, history)
+        # ── Step 1: Intent Routing ────────────────────────────────
+        # Analyzes query to get intent, language, search_string, requires_rag.
+        # Always runs regardless of ingestion state — casual queries need no corpus.
+        router_output = llm_client.analyze_intent(req.query, history)
+        intent = router_output.get("intent", "general_question")
+        requires_rag = router_output.get("requires_rag", True)
+        search_query = router_output.get("search_string", req.query)
+
+        # ── Step 2a: Casual Fast Path (no RAG, no Verifier) ──────
+        if not requires_rag:
+            print(f"  ⚡ Casual fast path: intent='{intent}' — skipping RAG and Verifier")
+            result = llm_client.generate_answer(
+                req.query,
+                retrieved_chunks=[],        # No sources needed for casual chat
+                system_prompt=req.system_prompt,
+                conversation_history=history,
+            )
+            session_manager.add_turn(session_id, "user", req.query)
+            session_manager.add_turn(session_id, "assistant", result.get("answer_text", ""))
+            session_manager.cleanup_expired()
+            return ChatResponse(
+                answer_text=result.get("answer_text", ""),
+                can_answer=result.get("can_answer", True),
+                citations=[],
+                follow_up=result.get("follow_up", ""),
+                closing=result.get("closing", ""),
+                session_id=session_id,
+            )
+
+        # ── Step 2b: RAG Path ─────────────────────────────────────
+        # Only check ingestion state when we actually need the corpus.
+        if not vector_store.is_ingested(tenant_id):
+            return ChatResponse(
+                answer_text="No source texts have been linked to this persona. The administrator needs to run the ingestion script.",
+                can_answer=False,
+                session_id=session_id,
+            )
 
         # Retrieve with appropriate strategy based on search query complexity
         is_complex = len(search_query) > 60
@@ -160,10 +196,12 @@ async def chat(tenant_id: str, req: ChatRequest):
                 session_id=session_id,
             )
 
-        # Generate answer with provided system prompt and history
-        # Note: We pass the ORIGINAL user query here, not the search query, 
-        # so the bot answers naturally.
-        result = llm_client.generate_answer(req.query, retrieved_chunks, req.system_prompt, history)
+        # Generate answer with provided system prompt and history.
+        # Pass the ORIGINAL user query (not the search string) so the bot
+        # answers naturally and in the user's own language.
+        result = llm_client.generate_answer(
+            req.query, retrieved_chunks, req.system_prompt, history
+        )
 
         # Verify grounding
         if result.get("can_answer") and config.ENABLE_VERIFICATION:
@@ -176,7 +214,6 @@ async def chat(tenant_id: str, req: ChatRequest):
         # Store turns in sandboxed session memory
         session_manager.add_turn(session_id, "user", req.query)
         session_manager.add_turn(session_id, "assistant", result.get("answer_text", ""))
-
         session_manager.cleanup_expired()
 
         return ChatResponse(
