@@ -93,8 +93,15 @@ def _format_chunks_for_prompt(chunks: list[dict]) -> str:
     return "\n\n".join(source_blocks)
 
 
-def _build_user_message(query: str, sources_text: str) -> str:
+def _build_user_message(query: str, sources_text: str, is_casual: bool = False) -> str:
     """Build the shared user-turn message injected into every generation call."""
+    if is_casual:
+        return (
+            f"USER QUERY: {query}\n\n"
+            f"This is a casual query or greeting. Respond naturally in your persona voice. "
+            f"You do NOT need to cite sources for this. Respond in the required JSON format."
+        )
+
     return (
         f"Here are the SOURCE documents you MUST use to answer:\n\n{sources_text}\n\n---\n\n"
         f"USER QUERY: {query}\n\n"
@@ -105,7 +112,7 @@ def _build_user_message(query: str, sources_text: str) -> str:
 # ── Generation ────────────────────────────────────────────
 
 def _generate_openrouter(query: str, sources_text: str, system_prompt: str,
-                         conversation_history: list[dict] = None) -> dict:
+                         conversation_history: list[dict] = None, is_casual: bool = False) -> dict:
     """Generate answer using OpenRouter."""
     client = _get_openrouter_client()
 
@@ -115,7 +122,7 @@ def _generate_openrouter(query: str, sources_text: str, system_prompt: str,
             role = "user" if turn["role"] == "user" else "assistant"
             messages.append({"role": role, "content": turn["content"]})
 
-    messages.append({"role": "user", "content": _build_user_message(query, sources_text)})
+    messages.append({"role": "user", "content": _build_user_message(query, sources_text, is_casual)})
 
     response = client.chat.completions.create(
         model=config.OPENROUTER_MODEL,
@@ -207,20 +214,19 @@ def rewrite_query(query: str, conversation_history: list[dict] = None) -> str:
 # ── Public API ────────────────────────────────────────────
 
 def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str,
-                    conversation_history: list[dict] = None) -> dict:
+                    conversation_history: list[dict] = None, intent: str = None) -> dict:
     """
     Generate a persona-voiced answer grounded in source chunks.
 
     Args:
-        query: The original user question (not the rewritten search string).
+        query: The original user question.
         retrieved_chunks: Chunks from vector store search.
         system_prompt: The complete persona ruleset.
-        conversation_history: Previous turns for conversational context (optional).
-
-    Returns:
-        Parsed JSON dict with: can_answer, answer_text, citations[], follow_up, closing.
+        conversation_history: Previous turns.
+        intent: The intent from the Router (e.g. 'casual', 'terminology').
     """
-    sources_text = _format_chunks_for_prompt(retrieved_chunks)
+    is_casual = (intent == "casual") or (not retrieved_chunks and not intent)
+    sources_text = _format_chunks_for_prompt(retrieved_chunks) if retrieved_chunks else ""
 
     # ── Input Length Guard ────────────────────────────────
     # Conservative token estimate: 4 chars ≈ 1 token (tuned for mixed Arabic/English)
@@ -234,7 +240,7 @@ def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str
         return _empty_response()
 
     try:
-        result = _generate_openrouter(query, sources_text, system_prompt, conversation_history)
+        result = _generate_openrouter(query, sources_text, system_prompt, conversation_history, is_casual)
 
         # ── Normalize field aliases from different model outputs ──
         # Some models return "answer" or "response" instead of "answer_text"

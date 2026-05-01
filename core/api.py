@@ -149,6 +149,7 @@ async def chat(tenant_id: str, req: ChatRequest):
                 retrieved_chunks=[],        # No sources needed for casual chat
                 system_prompt=req.system_prompt,
                 conversation_history=history,
+                intent=intent,
             )
             session_manager.add_turn(session_id, "user", req.query)
             session_manager.add_turn(session_id, "assistant", result.get("answer_text", ""))
@@ -200,7 +201,7 @@ async def chat(tenant_id: str, req: ChatRequest):
         # Pass the ORIGINAL user query (not the search string) so the bot
         # answers naturally and in the user's own language.
         result = llm_client.generate_answer(
-            req.query, retrieved_chunks, req.system_prompt, history
+            req.query, retrieved_chunks, req.system_prompt, history, intent=intent
         )
 
         # Verify grounding
