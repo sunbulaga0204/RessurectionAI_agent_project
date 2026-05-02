@@ -209,7 +209,7 @@ async def chat(tenant_id: str, req: ChatRequest):
             is_grounded = llm_client.verify_answer(retrieved_chunks, result)
             if not is_grounded:
                 result["can_answer"] = False
-                result["answer_text"] = "I prefer not to provide an unverified answer."
+                result["answer_text"] = "I prefer not to provide an unverified answer, this is beyond my knowledge."
                 result["citations"] = []
 
         # Store turns in sandboxed session memory

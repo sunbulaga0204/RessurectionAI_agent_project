@@ -8,7 +8,7 @@ A replicable RAG-based framework for creating AI chatbot personas of historical 
 
 **Created by Anggi Azzuhri**
 
-Built with Python · ChromaDB · Gemini/Claude · FastAPI · Telegram
+Built with Python · PostgreSQL (pgvector) · OpenRouter (120B/3B) · Voyage AI · FastAPI · Telegram
 
 ---
 
@@ -48,24 +48,14 @@ The **page number** refers to the original source text, so you can look it up yo
 - Click the ⬇️ **download** button to save your conversation as a `.md` file
 - Click the 🔄 **refresh** button to start a new session
 
-## How to Use (Telegram)
+## 🚀 Accessing the Agent
 
-1. Find the bot on Telegram and send `/start`
-2. Type your question directly
-3. Available commands:
-   - `/help` — Usage guide
-   - `/about` — Who is this persona
-   - `/sources` — View loaded source books
-   - `/export` — Download conversation transcript
-   - `/newsession` — Clear context, start fresh
+The current production instance is the **Al-Ghazali Agent**, specialized in the works of Imam Abu Hamid al-Ghazali (Ihya' Ulum al-Din, Al-Munqidh, etc.).
 
-## Important Disclaimers
+- **Telegram Bot:** [t.me/ghazali_agent_bot](https://t.me/ghazali_agent_bot)
+- **Web Interface:** [https://ghazali.ressurection.ai](https://ghazali.ressurection.ai)
 
-> ⚠️ **This is an AI reconstruction** based on the documented writings of the historical figure. It does not represent the actual views or opinions of the real person.
-
-> ⚠️ **Always verify** citations against the original source texts. While the system is designed to prevent fabrication, no AI system is perfect.
-
-> ⚠️ **Research use only.** This tool is designed to assist scholarly inquiry, not to replace it.
+> **Research use only.** This tool is designed to assist scholarly inquiry, not to replace it. Always verify citations.
 
 ---
 
@@ -74,42 +64,46 @@ The **page number** refers to the original source text, so you can look it up yo
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   FRONTENDS                      │
-│  ┌──────────────┐    ┌────────────────────────┐  │
-│  │ Telegram Bot  │    │  Web Chatbot (FastAPI)  │  │
-│  └──────┬───────┘    └──────────┬─────────────┘  │
-│         │                       │                 │
-│         └──────────┬────────────┘                 │
-│                    ▼                              │
-│         ┌─────────────────────┐                   │
-│         │    api.py (FastAPI)   │                   │
-│         │  Session Manager     │                   │
-│         └─────────┬───────────┘                   │
-│                   ▼                              │
-│  ┌────────────────────────────────────────────┐  │
-│  │              RAG PIPELINE                   │  │
-│  │  ┌─────────────┐  ┌───────────────────┐   │  │
-│  │  │ vector_store │  │   llm_client.py   │   │  │
-│  │  │  (ChromaDB)  │  │ (Claude / Gemini) │   │  │
-│  │  └──────┬──────┘  └────────┬──────────┘   │  │
-│  │         │                  │               │  │
-│  │         └──────┬───────────┘               │  │
-│  │                ▼                           │  │
-│  │    ┌──────────────────────┐                │  │
-│  │    │  system_prompt.py     │                │  │
-│  │    │  persona.json         │                │  │
-│  │    │  research_notes.md    │                │  │
-│  │    └──────────────────────┘                │  │
-│  └────────────────────────────────────────────┘  │
-│                                                  │
-│  ┌────────────────────────────────────────────┐  │
-│  │            INGESTION PIPELINE               │  │
-│  │  txt_to_json.py → data_loader → chunker    │  │
-│  │        → vector_store.ingest()              │  │
-│  └────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                       FRONTENDS                         │
+│  ┌──────────────┐     ┌──────────────────────────────┐  │
+│  │ Telegram Bot  │     │ Web Interface (React/Next.js)│  │
+│  └──────┬───────┘     └──────────────┬───────────────┘  │
+│         │                            │                  │
+│         └──────────────┬─────────────┘                  │
+│                        ▼                                │
+│           ┌─────────────────────────┐                   │
+│           │      api.py (FastAPI)   │                   │
+│           │   (Multi-tenant Logic)  │                   │
+│           └────────────┬────────────┘                   │
+│                        ▼                                │
+│      ┌───────────────────────────────────────────┐      │
+│      │        ORCHESTRATION & RAG ENGINE         │      │
+│      │  ┌──────────────┐       ┌──────────────┐  │      │
+│      │  │ INTENT ROUTER│ ─────▶│ VECTOR STORE │  │      │
+│      │  │ (Llama 3B)   │       │ (PostgreSQL) │  │      │
+│      │  └──────────────┘       └──────────────┘  │      │
+│      │         │                      │          │      │
+│      │         ▼                      ▼          │      │
+│      │  ┌──────────────┐       ┌──────────────┐  │      │
+│      │  │ GENERATOR    │◀──────┤ VERIFIER     │  │      │
+│      │  │ (GPT-OSS 120B)│       │ (Llama 3B)   │  │      │
+│      │  └──────────────┘       └──────────────┘  │      │
+│      └───────────────────────────────────────────┘      │
+│                        ▼                                │
+│             ┌──────────────────────┐                    │
+│             │   PERSONA DEFINITION │                    │
+│             │ (persona.json + SP)  │                    │
+│             └──────────────────────┘                    │
+└─────────────────────────────────────────────────────────┘
 ```
+
+## Core Differentiators
+
+- **Intent-Based Routing:** Uses a fast 3B model to analyze user intent. Greetings and small talk bypass the RAG pipeline entirely for sub-2s latency.
+- **PostgreSQL / HNSW:** Production-ready vector search using `pgvector` with HNSW indices for high-concurrency multi-tenant performance.
+- **Language Consistency:** Native detection of Indonesian, Arabic, and English to ensure the persona responds in the user's language without losing technical Arabic terms.
+- **Hallucination Verification:** A secondary "Verifier" pass checks every citation and claim for anachronisms or fabrications before the user sees them.
 
 ## Quick Start
 
@@ -126,7 +120,7 @@ cp .env.example .env
 
 # 3. Prepare & Ingest sources [REDACTED FOR PUBLIC REPO]
 # The system integrates primary source datasets by chunking and embedding
-# the texts into the vector store (ChromaDB) for retrieval.
+# the texts into the vector store (PostgreSQL/pgvector) for retrieval.
 # <database_commands_censored>
 
 # 5. Start the agent
@@ -186,7 +180,7 @@ Add notes from biographers and scholars about the figure's rhetorical style:
 
 > **[REDACTED]** *The precise tools and commands for formatting and database ingestion have been hidden in this public documentation.*
 > 
-> *General Process:* The prepared primary source documents and metadata are ingested into a vector database (ChromaDB) using semantic embeddings. This integrates the dataset with the core model pipeline, creating the foundational knowledge base the LLM searches to generate cited, historically accurate responses.
+> *General Process:* The prepared primary source documents and metadata are ingested into a vector database (PostgreSQL/pgvector) using semantic embeddings. This integrates the dataset with the core model pipeline, creating the foundational knowledge base the LLM searches to generate cited, historically accurate responses.
 
 ### Step 4: Run
 
@@ -200,23 +194,25 @@ That's it. The entire RAG pipeline, citation engine, and frontends adapt automat
 
 > **[REDACTED]** *The specific schema and formatting rules for the raw data have been hidden.*
 > 
-> *Integration Summary:* The framework is built to process structured or semi-structured text data. The crucial integration step involves preserving metadata (such as book titles, chapter contexts, and original page numbers) alongside the text. When this dataset is chunked and embedded via Voyage AI into ChromaDB, the metadata is permanently attached to the semantic vectors, thereby enabling the output model to provide precise, page-level citations in its responses.
+> *Integration Summary:* The framework is built to process structured or semi-structured text data. The crucial integration step involves preserving metadata (such as book titles, chapter contexts, and original page numbers) alongside the text. When this dataset is chunked and embedded via Voyage AI into PostgreSQL, the metadata is permanently attached to the semantic vectors, thereby enabling the output model to provide precise, page-level citations in its responses.
 
 ## LLM Provider Configuration
 
-| Provider | Env Variable | Best For | Cost |
-|----------|-------------|----------|------|
-| Gemini 2.5 Flash | `LLM_PROVIDER=gemini` | Free tier, large corpora | Free |
-| Claude Sonnet | `LLM_PROVIDER=claude` | Superior persona fidelity | Paid |
+The system uses **OpenRouter** as the primary provider to route to specialized models.
 
-**Note:** Embeddings exclusively use **Voyage AI (voyage-4-lite)** for superior retrieval and context windows, regardless of the generation provider.
+| Component | Model | Role |
+|-----------|-------|------|
+| **Generator** | `openai/gpt-oss-120b` | High-fidelity persona-voiced answer generation |
+| **Router** | `meta-llama/llama-3.2-3b-instruct` | Fast intent classification and search string optimization |
+| **Verifier** | `meta-llama/llama-3.2-3b-instruct` | Hallucination and anachronism checking |
+| **Embedding** | `voyage-4-lite` | High-precision vector embeddings (Voyage AI) |
 
 Set in `.env`:
 ```
-LLM_PROVIDER=gemini          # or "claude"
-GEMINI_API_KEY=your-key       # Required for the response generator
-ANTHROPIC_API_KEY=your-key    # Only if using Claude
-VOYAGE_API_KEY=your-key       # Always required (for embeddings)
+OPENROUTER_API_KEY=your-key
+VOYAGE_API_KEY=your-key
+VECTOR_STORE_TYPE=postgres
+DATABASE_URL=postgresql://...
 ```
 
 ## Project Structure
@@ -237,7 +233,7 @@ Ressurection Agent/
 ├── session_manager.py        # Conversation memory + export
 ├── data_loader.py            # JSON/TXT source loading
 ├── chunker.py                # Sentence-aware text splitting
-├── vector_store.py           # ChromaDB + Gemini embeddings
+├── vector_store.py           # PostgreSQL + Voyage embeddings
 ├── txt_to_json.py            # TXT → JSON converter tool
 ├── api.py                    # FastAPI backend
 ├── telegram_bot.py           # Telegram bot handlers
@@ -252,7 +248,7 @@ Ressurection Agent/
 │   ├── raw/                  # Original TXT files (pre-conversion)
 │   └── sample.json           # Example data
 │
-└── chroma_db/                # Auto-created by ChromaDB
+└── postgres/                 # DB schemas and migrations
 ```
 
 ## API Endpoints
@@ -305,7 +301,7 @@ Edit `data_loader.py` — add a new loader function and register it in the `LOAD
 Edit the `_format_response()` function in `telegram_bot.py` and the `appendAssistantMessage()` function in `static/app.js`.
 
 ### Multiple Personas
-Each persona uses a different ChromaDB collection (derived from `persona.json`'s `name_display`). To switch personas, simply swap the `persona.json`, `research_notes.md`, and source files, then re-ingest.
+Each persona is isolated by a unique `tenant_id`. To switch or replicate a persona, simply update the `TENANT_ID` in your environment variables and ensure the corresponding sources have been ingested into the PostgreSQL database under that ID.
 
 ### Deployment
 - **Local**: `python main.py`

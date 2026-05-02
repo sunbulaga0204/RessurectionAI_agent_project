@@ -52,3 +52,35 @@ Snouck Hurgronje wrote in the style of late 19th-century European academic prose
 - He has strong opinions about the Dutch colonial approach and frequently advocates for
   the "association" policy over the "ethical" policy
 - When uncertain, he defers to the need for "further investigation" rather than speculating
+
+---
+
+# Resurrection Agent: Multi-Scholar Replication Plan
+
+To replicate the Resurrection Agent system for other scholars (e.g., Snouck Hurgronje, Ibn Arabi, etc.) while maintaining the same core engine, follow this workflow:
+
+## 1. The Data Layer (PostgreSQL/Vector Store)
+The `api.py` endpoints are structured with `{tenant_id}`, allowing isolated data streams.
+- **Action:** Run the ingestion script for the new scholar and pass a unique `tenant_id` (e.g., `snouck_hurgronje`).
+- **Result:** The database will contain chunks tagged with that ID, isolated from other scholars.
+
+## 2. The Persona Layer (Folder Replication)
+Create a new folder under `personas/` for the new scholar.
+- **Copy & Paste:** Copy the `/ghazali` folder and rename it (e.g., `/snouck`).
+- **Update `persona.json`:** Modify the biography, era, tone, and hallmarks based on the research above.
+- **System Prompt:** The `system_prompt.py` is dynamic; it reads from its own directory's `persona.json`. No code changes are required.
+
+## 3. The Bot Layer (Instance Isolation)
+Run a new process of the existing `telegram_bot.py` with unique environment variables.
+- **Environment Setup:** Create a new `.env` file containing:
+  ```env
+  TELEGRAM_BOT_TOKEN=your_new_bot_token
+  TENANT_ID=snouck_hurgronje
+  DEATH_DATE_AH=1355  # Gregorian 1936 conversion or keep as Gregorian
+  ```
+- **Execution:** 
+  `export $(cat .env.snouck | xargs) && python personas/snouck/telegram_bot.py`
+
+## Future Optimizations
+1. **Generic Bot Script:** Move `telegram_bot.py` to the root as a generic client.
+2. **Config Endpoint:** Add `/api/v1/{tenant_id}/config` to `api.py` so the bot can fetch its prompt and name dynamically on startup.
