@@ -124,9 +124,17 @@ class PostgresStore(BaseVectorStore):
     def initialize(self):
         import psycopg2
         from psycopg2.extras import execute_values
-        if self.conn is None:
+        
+        # Check if connection exists and is still open
+        is_closed = self.conn is None or self.conn.closed != 0
+        
+        if is_closed:
             if not config.DATABASE_URL:
                 raise ValueError("DATABASE_URL is not set for PostgresStore")
+            
+            if self.conn is not None:
+                print("  ⚠ PostgreSQL connection lost. Reconnecting...")
+                
             self.conn = psycopg2.connect(config.DATABASE_URL)
             self.conn.autocommit = True
             with self.conn.cursor() as cur:
