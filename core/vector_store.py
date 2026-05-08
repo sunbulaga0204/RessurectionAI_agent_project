@@ -149,8 +149,17 @@ class PostgresStore(BaseVectorStore):
                         metadata jsonb,
                         embedding vector(1024)
                     );
+                    CREATE TABLE IF NOT EXISTS telegram_users (
+                        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id text NOT NULL,
+                        chat_id text NOT NULL,
+                        is_subscribed boolean DEFAULT FALSE,
+                        preferred_language text DEFAULT 'EN',
+                        timezone_offset integer DEFAULT 7,
+                        last_seen timestamp DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(tenant_id, chat_id)
+                    );
                     CREATE INDEX IF NOT EXISTS idx_chunks_tenant ON document_chunks(tenant_id, death_date_ah);
-                    -- HNSW index for lightning fast vector search
                     CREATE INDEX IF NOT EXISTS idx_chunks_vector ON document_chunks USING hnsw (embedding vector_cosine_ops);
                 """)
             print("  ✓ PostgreSQL client initialized (HNSW Index enabled)")
@@ -219,12 +228,55 @@ class PostgresStore(BaseVectorStore):
     def get_source_stats(self, tenant_id: str) -> Dict:
         self.initialize()
         with self.conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM document_chunks WHERE tenant_id = %s", (tenant_id,))
+            total = cur.fetchone()[0]
+            cur.execute("SELECT DISTINCT (metadata->>'book_name') FROM document_chunks WHERE tenant_id = %s", (tenant_id,))
+            books = [row[0] for row in cur.fetchall() if row[0]]
+            return {"total_chunks": total, "books": sorted(books)}
+
+    def register_user(self, tenant_id: str, chat_id: str, language: str = 'EN', timezone: int = 7):
+        self.initialize()
+        with self.conn.cursor() as cur:
             cur.execute("""
-                SELECT count(*), array_agg(DISTINCT (metadata->>'book_name'))
-                FROM document_chunks WHERE tenant_id = %s
-            """, (tenant_id,))
-            row = cur.fetchone()
-            return {"total_chunks": row[0], "books": sorted(row[1]) if row[1] and row[1][0] else []}
+                INSERT INTO telegram_users (tenant_id, chat_id, preferred_language, timezone_offset, last_seen)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (tenant_id, chat_id) DO UPDATE SET 
+                    last_seen = CURRENT_TIMESTAMP,
+                    preferred_language = %s
+            """, (tenant_id, chat_id, language, timezone, language))
+
+    def get_subscribed_users_for_hour(self, tenant_id: str, current_hour_utc: int) -> List[Dict]:
+        """Find users where (current_hour_utc + timezone_offset) % 24 == 8"""
+        self.initialize()
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT chat_id, preferred_language 
+                FROM telegram_users 
+                WHERE tenant_id = %s 
+                  AND is_subscribed = TRUE 
+                  AND ((%s + timezone_offset) %% 24) = 8
+            """, (tenant_id, current_hour_utc))
+            return [{"chat_id": row[0], "lang": row[1]} for row in cur.fetchall()]
+
+    def toggle_subscription(self, tenant_id: str, chat_id: str, status: bool):
+        self.initialize()
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                UPDATE telegram_users SET is_subscribed = %s 
+                WHERE tenant_id = %s AND chat_id = %s
+            """, (status, tenant_id, chat_id))
+
+    def get_subscribed_users(self, tenant_id: str) -> List[str]:
+        self.initialize()
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT chat_id FROM telegram_users WHERE tenant_id = %s AND is_subscribed = TRUE", (tenant_id,))
+            return [row[0] for row in cur.fetchall()]
+
+    def get_all_users(self, tenant_id: str) -> List[str]:
+        self.initialize()
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT chat_id FROM telegram_users WHERE tenant_id = %s", (tenant_id,))
+            return [row[0] for row in cur.fetchall()]
 
     def clear(self, tenant_id: str):
         self.initialize()
@@ -269,6 +321,12 @@ def get_existing_ids(tenant_id: str) -> List[str]: return _get_store().get_exist
 def ingest(tenant_id: str, death_date_ah: str, chunks: List[Dict]): _get_store().ingest(tenant_id, death_date_ah, chunks)
 def clear(tenant_id: str): _get_store().clear(tenant_id)
 def get_source_stats(tenant_id: str) -> Dict: return _get_store().get_source_stats(tenant_id)
+def register_user(tenant_id: str, chat_id: str, language: str = 'EN', timezone: int = 7): 
+    _get_store().register_user(tenant_id, chat_id, language, timezone)
+def toggle_subscription(tenant_id: str, chat_id: str, status: bool): _get_store().toggle_subscription(tenant_id, chat_id, status)
+def get_subscribed_users_for_hour(tenant_id: str, current_hour_utc: int) -> List[Dict]: 
+    return _get_store().get_subscribed_users_for_hour(tenant_id, current_hour_utc)
+def get_all_users(tenant_id: str) -> List[str]: return _get_store().get_all_users(tenant_id)
 
 def query(tenant_id: str, text: str, death_date_ah: str, top_k: int = None) -> List[Dict]:
     top_k = top_k or config.TOP_K

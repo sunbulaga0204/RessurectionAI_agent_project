@@ -177,6 +177,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += f"/help — How to use this bot\n"
     msg += f"/about — About this persona\n"
     msg += f"/sources — View loaded source texts\n"
+    msg += f"/subscribe — Get daily morning wisdom ✨\n"
+    msg += f"/unsubscribe — Stop daily messages\n"
     if disclaimer:
         msg += f"\n⚠️ _{_escape_md(disclaimer)}_"
 
@@ -244,6 +246,40 @@ async def sources_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg)
 
 
+async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    payload = {"chat_id": chat_id, "status": True}
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(f"{API_BASE_URL}/{TENANT_ID}/subscribe", json=payload) as resp:
+                if resp.status == 200:
+                    msg = "✨ *Subscribed\\!* I will send you a small piece of wisdom every morning\\."
+                else:
+                    msg = "❌ Failed to update subscription status\\."
+        except Exception:
+            msg = "❌ Connection error\\."
+
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    payload = {"chat_id": chat_id, "status": False}
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(f"{API_BASE_URL}/{TENANT_ID}/subscribe", json=payload) as resp:
+                if resp.status == 200:
+                    msg = "👋 *Unsubscribed\\.* You will no longer receive daily messages\\."
+                else:
+                    msg = "❌ Failed to update subscription status\\."
+        except Exception:
+            msg = "❌ Connection error\\."
+
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+
 # ── Message Handler ──────────────────────────────────────
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -264,15 +300,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Error loading persona memory.")
         return
 
-    # Log detected language for diagnostics (Router handles enforcement server-side)
+    # Detect language and map to ID/EN code for user profile and prompt routing
     detected_lang = _detect_language(query)
     logger.info(f"Language detected (client-side heuristic): {detected_lang}")
+    lang_code = "ID" if detected_lang in ["Indonesian", "Malay"] else "EN"
 
     payload = {
         "query": query,
         "system_prompt": prompt,
         "death_date_ah": DEATH_DATE_AH,
-        "session_id": telegram_user_id
+        "session_id": telegram_user_id,
+        "language": lang_code,
+        "timezone": 7  # Defaulting to Indonesia WIB for now
     }
 
     # 2. Send POST request to Core SaaS Endpoint
@@ -345,6 +384,8 @@ def create_bot() -> Application:
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("about", about_command))
     app.add_handler(CommandHandler("sources", sources_command))
+    app.add_handler(CommandHandler("subscribe", subscribe_command))
+    app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return app
 

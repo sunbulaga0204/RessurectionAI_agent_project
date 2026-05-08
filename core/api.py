@@ -10,6 +10,8 @@ Pipeline flow:
 """
 
 import logging
+import asyncio
+import datetime
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -30,10 +32,30 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize core services on startup."""
+    """Initialize core services and background scheduler on startup."""
     store_type = config.VECTOR_STORE_TYPE.capitalize()
     print(f"\n🗄️  Initializing {store_type} Vector Store...")
     vector_store.initialize()
+
+    # ── Start Daily Scheduler ─────────────────────────────
+    async def scheduler_loop():
+        from broadcast_motivation import run_broadcast_for_hour
+        
+        print(f"⏰ Scheduler: Active (Checking hourly for 08:00 AM local time delivery).")
+        while True:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            # The broadcast_motivation script handles the 'if 8am' logic internally for each user
+            try:
+                await run_broadcast_for_hour(now.hour)
+            except Exception as e:
+                logger.error(f"Scheduler Error: {e}")
+            
+            # Sleep for 1 hour
+            await asyncio.sleep(3600)
+
+    # Run scheduler in the background
+    asyncio.create_task(scheduler_loop())
+    
     yield
     print("\n👋 Resurrection Agent shutting down...")
 
@@ -61,6 +83,8 @@ class ChatRequest(BaseModel):
     system_prompt: str
     death_date_ah: str
     session_id: Optional[str] = None
+    language: str = "EN"
+    timezone: int = 7
 
 
 class Citation(BaseModel):
@@ -97,6 +121,11 @@ class ExportRequest(BaseModel):
     format: str = "json"  # "json" or "markdown"
 
 
+class SubscriptionRequest(BaseModel):
+    chat_id: str
+    status: bool
+
+
 # ── Endpoints ────────────────────────────────────────────
 
 @app.get("/api/health")
@@ -118,6 +147,13 @@ async def sources(tenant_id: str):
     return stats
 
 
+@app.post("/api/v1/{tenant_id}/subscribe")
+async def subscribe(tenant_id: str, req: SubscriptionRequest):
+    """Toggle user subscription for daily messages."""
+    vector_store.toggle_subscription(tenant_id, req.chat_id, req.status)
+    return {"status": "ok", "is_subscribed": req.status}
+
+
 @app.post("/api/v1/{tenant_id}/chat", response_model=ChatResponse)
 async def chat(tenant_id: str, req: ChatRequest):
     """
@@ -131,6 +167,13 @@ async def chat(tenant_id: str, req: ChatRequest):
     # Session management sandboxed by tenant
     session_id = session_manager.get_or_create_session(tenant_id, req.session_id)
     history = session_manager.get_history(session_id)
+
+    # Register user for potential broadcasting (if session_id looks like a Telegram ID)
+    if req.session_id and req.session_id.isdigit():
+        try:
+            vector_store.register_user(tenant_id, req.session_id, req.language, req.timezone)
+        except Exception as e:
+            logger.warning(f"Failed to register user: {e}")
 
     try:
         # ── Step 1: Intent Routing ────────────────────────────────
