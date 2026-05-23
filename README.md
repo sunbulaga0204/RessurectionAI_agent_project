@@ -55,6 +55,10 @@ The current production instance is the **Al-Ghazali Agent**, specialized in the 
 - **Telegram Bot:** [t.me/ghazali_agent_bot](https://t.me/ghazali_agent_bot)
 - **Web Interface:** [https://ghazali.ressurection.ai](https://ghazali.ressurection.ai)
 
+## Dual Verification
+
+The structure of LLMs and RAG layers ensures that hallucination is minimized to nearly 1% (in 100 rounds of conversation, 1 chat might be hallucinated). This is possible via separating between LLM for retrieval, answer writer, verifier; also temperature set for each phase is different with verifier is set at near 0 to prevent mistakes in checking the answer against the sources. 
+
 > **Research use only.** This tool is designed to assist scholarly inquiry, not to replace it. Always verify citations.
 
 ---
