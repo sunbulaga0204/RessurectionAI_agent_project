@@ -23,7 +23,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TENANT_ID = "ghazali"
 DEATH_DATE_AH = "505"
 
-# Multi-lingual queries
+# Multi-lingual queries targeting different fields of spiritual/human improvement
 QUERIES = {
     "EN": [
         "Give me a profound motivation for improving my connection with Allah based on your works.",
@@ -38,7 +38,16 @@ QUERIES = {
 }
 
 async def send_telegram_message(chat_id, text):
-    """Send a message via Telegram Bot API."""
+    """
+    Dispatches a Telegram text notification using HTTP POST payload mapping.
+    Uses MarkdownV2 rendering parameters.
+    
+    Args:
+        chat_id: Numerical Telegram identifier.
+        text: Escaped Markdown message content.
+    Returns:
+        bool: True if the request returned 200 OK, False otherwise.
+    """
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "MarkdownV2"}
     
@@ -50,12 +59,27 @@ async def send_telegram_message(chat_id, text):
             return False
 
 def escape_md(t):
+    """
+    Helper to escape reserved characters required for Telegram MarkdownV2 compliance.
+    Prevents formatting parsers from throwing syntax exceptions on typical texts.
+    """
     for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
         t = t.replace(char, f'\\{char}')
     return t
 
 async def run_broadcast_for_hour(current_hour_utc: int):
-    """Run broadcast only for users where it is 08:00 AM local time."""
+    """
+    Timezone-aware motivation dispatcher routine.
+    
+    Flow:
+      1. Queries vector store to discover registered subscribers where local time matches 08:00 AM.
+      2. Groups matched users by preferred language (EN vs ID) to optimize token efficiency.
+      3. Generates a single, grounded motivational response per language group.
+      4. Loops through target chat IDs to dispatch messages with short delays.
+      
+    Args:
+        current_hour_utc: The active hour in UTC (0-23) to resolve local client offsets.
+    """
     if not TELEGRAM_BOT_TOKEN: return
 
     vector_store.initialize()
@@ -81,21 +105,24 @@ async def run_broadcast_for_hour(current_hour_utc: int):
         print(f"📝 Generating {lang} motivation for {len(chat_ids)} users...")
         query_text = random.choice(QUERIES[lang])
         
+        # Pull grounding references from the vector database using multi-layer expansion
         chunks = vector_store.query_multilayer(TENANT_ID, query_text, DEATH_DATE_AH)
         result = llm_client.generate_answer(query_text, chunks, system_prompt, intent="motivation_blast")
         
         if not result.get("can_answer"): continue
 
+        # Format layout using Telegram formatting syntax
         header = "✨ *Daily Wisdom*" if lang == "EN" else "✨ *Hikmah Harian*"
         msg = f"{header} from Imam Al\\-Ghazali\n\n"
         msg += f"{escape_md(result.get('answer_text', ''))}\n\n"
         msg += f"_{escape_md(result.get('closing', ''))}_"
 
-        # 3. Send to all users in this language group
+        # 3. Batch dispatch to users matching this language cohort
         for chat_id in chat_ids:
             await send_telegram_message(chat_id, msg)
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.05) # Prevent rate-limiting limits
 
 if __name__ == "__main__":
     now_utc = datetime.datetime.now(datetime.timezone.utc).hour
     asyncio.run(run_broadcast_for_hour(now_utc))
+

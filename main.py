@@ -1,6 +1,11 @@
 """
 Main Entry Point — starts the Resurrection Agent.
 
+This module acts as the bootsrapper for the Resurrection Agent SaaS Node.
+It handles CLI parameter parsing, global logging initialization, credentials
+validation, vector store pre-warming, and manages process execution by either
+spinning up the Telegram bot, the FastAPI uvicorn server, or both in tandem.
+
 Usage:
     python main.py                  # Web UI + API only
     python main.py --telegram       # Web UI + API + Telegram bot
@@ -17,12 +22,22 @@ from core import vector_store
 
 
 def main():
+    """
+    Main orchestration routine.
+    1. Parses command line arguments to determine execution mode.
+    2. Configures standard output logging.
+    3. Validates essential API keys for LLMs and embeddings.
+    4. Initializes the vector store.
+    5. Optionally spawns a background thread for the Telegram Bot.
+    6. Starts the uvicorn server to host the REST API endpoints.
+    """
+    # ── 1. Parse Command Line Arguments ───────────────────────────
     parser = argparse.ArgumentParser(description="Resurrection Agent — SaaS API Backend Node")
     parser.add_argument("--telegram", action="store_true", help="Start the Telegram bot along with the API.")
     parser.add_argument("--telegram-only", action="store_true", help="Start only the Telegram bot.")
     args = parser.parse_args()
 
-    # Configure logging
+    # ── 2. Configure Logging ──────────────────────────────────────
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         level=logging.INFO,
@@ -32,27 +47,32 @@ def main():
     print("  🚀  Resurrection Agent — SaaS Core API Started")
     print("=" * 60)
 
-    # Validate required API keys (OpenRouter is the single LLM provider)
+    # ── 3. Validate Credentials & Key Environments ────────────────
+    # OpenRouter serves as the LLM completion gateway
     if not config.OPENROUTER_API_KEY:
         print("\n✗ OPENROUTER_API_KEY not set. Add it to your .env file.")
         sys.exit(1)
 
+    # Voyage AI is required for embedding generation
     if not config.VOYAGE_API_KEY:
         print("\n✗ VOYAGE_API_KEY not set. Required for embeddings.")
         sys.exit(1)
 
-    # Prepare vector store client (lazy load on requests)
+    # ── 4. Warm-up Vector Database ────────────────────────────────
+    # Pre-selects and tests connections to either local ChromaDB or pgvector
     store_type = config.VECTOR_STORE_TYPE.capitalize()
     print(f"\n🗄️  Initializing {store_type} Vector Store...")
     vector_store.initialize()
 
-    # ── Start Telegram Bot ─────────────────────────────────────
+    # ── 5. Spawn Telegram Bot Thread ──────────────────────────────
     if args.telegram or args.telegram_only:
         from personas.ghazali.telegram_bot import run_bot as start_telegram_bot
         print("\n🤖 Starting Telegram Bot thread...")
+        # Start bot in a background daemon thread to not block the main FastAPI process
         bot_thread = threading.Thread(target=start_telegram_bot, daemon=True)
         bot_thread.start()
 
+    # ── 6. Handle Telegram-only Execution ─────────────────────────
     if args.telegram_only:
         print("\n⏳ Running in Telegram-only mode. Press Ctrl+C to stop.")
         import time
@@ -63,7 +83,7 @@ def main():
             print("\n🛑 Stopping...")
             sys.exit(0)
 
-    # Print config summary
+    # ── 7. Print Active Runtime Config ────────────────────────────
     print(f"\n⚙️  Configuration:")
     print(f"  Provider:        OpenRouter")
     print(f"  Generator:       {config.OPENROUTER_MODEL}")
@@ -75,7 +95,7 @@ def main():
     print(f"  Verification:    {'Enabled' if config.ENABLE_VERIFICATION else 'Disabled'}")
     print(f"  Session TTL:     {config.SESSION_TTL_HOURS}h")
 
-    # ── Start SaaS API Server ───────────────────────────────────
+    # ── 8. Boot SaaS HTTP API Server ──────────────────────────────
     import uvicorn
     print(f"\n🌐 Serving SaaS API at http://{config.HOST}:{config.PORT}")
     uvicorn.run(
@@ -88,3 +108,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

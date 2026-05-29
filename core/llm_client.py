@@ -16,7 +16,10 @@ _openrouter_client = None
 
 
 def _get_openrouter_client():
-    """Lazy-initialize the OpenRouter client."""
+    """
+    Lazy-initialize the OpenRouter client using the official OpenAI client SDK.
+    Caches the client object in module state to optimize reuse across requests.
+    """
     global _openrouter_client
     if _openrouter_client is None:
         import openai
@@ -73,7 +76,16 @@ Output ONLY the JSON object.
 # ── Source Formatting ─────────────────────────────────────
 
 def _format_chunks_for_prompt(chunks: list[dict]) -> str:
-    """Format retrieved chunks as numbered source blocks for the prompt."""
+    """
+    Format retrieved database chunks as clean structured text blocks.
+    Maps metadata identifiers (Book, Volume, Chapter, Page) for optimal 
+    LLM citation reference capability.
+    
+    Args:
+        chunks: List of document dictionaries retrieved from the vector store.
+    Returns:
+        Structured string of source documentation blocks.
+    """
     source_blocks = []
     for i, chunk in enumerate(chunks, 1):
         meta = chunk.get("metadata", {})
@@ -94,7 +106,15 @@ def _format_chunks_for_prompt(chunks: list[dict]) -> str:
 
 
 def _build_user_message(query: str, sources_text: str, is_casual: bool = False) -> str:
-    """Build the shared user-turn message injected into every generation call."""
+    """
+    Constructs the target user prompt injected directly into the API conversation thread.
+    Differentiates structures depending on casual mode vs active RAG retrieval.
+    
+    Args:
+        query: The raw query sent by the user.
+        sources_text: Pre-formatted RAG documents.
+        is_casual: Boolean flag designating conversational bypass mode.
+    """
     if is_casual:
         return (
             f"USER QUERY: {query}\n\n"
@@ -109,11 +129,14 @@ def _build_user_message(query: str, sources_text: str, is_casual: bool = False) 
     )
 
 
-# ── Generation ────────────────────────────────────────────
+# ── Generation Core ───────────────────────────────────────
 
 def _generate_openrouter(query: str, sources_text: str, system_prompt: str,
                          conversation_history: list[dict] = None, is_casual: bool = False) -> dict:
-    """Generate answer using OpenRouter."""
+    """
+    Internal execution wrapper that formats context history, appends user prompts,
+    and calls the OpenRouter completion endpoint expecting JSON object outputs.
+    """
     client = _get_openrouter_client()
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -138,9 +161,14 @@ def _generate_openrouter(query: str, sources_text: str, system_prompt: str,
 
 def analyze_intent(query: str, conversation_history: list[dict] = None) -> dict:
     """
-    Analyze the user's query to determine intent, language, and search strategy.
-    Uses the fast ROUTER_MODEL via OpenRouter with structured JSON output.
-    Returns a dict with: intent, language, search_string, requires_rag.
+    Evaluates context history and current inquiry to perform routing checks.
+    Determines:
+    1. Overall intent classification ('casual', 'terminology', or 'general_question').
+    2. Preferred user language context.
+    3. Context-resolved 'search_string' to enhance embedding searches.
+    4. Whether RAG is required (avoiding database costs for chat greetings).
+
+    Uses the fast, lightweight ROUTER_MODEL via OpenRouter for latency optimization.
     """
     default_result = {
         "intent": "general_question",
@@ -149,7 +177,7 @@ def analyze_intent(query: str, conversation_history: list[dict] = None) -> dict:
         "requires_rag": True,
     }
 
-    # Build history context if available
+    # Limit context logs based on configuration limits to prevent context blowing
     history_str = ""
     if conversation_history:
         for turn in conversation_history[-config.ROUTER_HISTORY_TURNS:]:
@@ -181,13 +209,12 @@ def analyze_intent(query: str, conversation_history: list[dict] = None) -> dict:
 
         result = json.loads(raw.strip())
 
-        # Validate and fill defaults for any missing fields
+        # Ensure essential structure exists
         result.setdefault("intent", "general_question")
         result.setdefault("language", "English")
         result.setdefault("search_string", query)
         result.setdefault("requires_rag", True)
 
-        # Ensure search_string is never empty
         if not result["search_string"].strip():
             result["search_string"] = query
 
@@ -202,11 +229,11 @@ def analyze_intent(query: str, conversation_history: list[dict] = None) -> dict:
 
 def rewrite_query(query: str, conversation_history: list[dict] = None) -> str:
     """
-    Legacy wrapper around analyze_intent().
-    Returns only the search_string for backward compatibility with api.py.
+    Legacy query resolution wrapper around analyze_intent().
+    Returns the computed query string for search retrieval compatibility.
     """
     if not conversation_history:
-        return query  # No prior context to resolve
+        return query
     result = analyze_intent(query, conversation_history)
     return result.get("search_string", query)
 
@@ -216,20 +243,20 @@ def rewrite_query(query: str, conversation_history: list[dict] = None) -> str:
 def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str,
                     conversation_history: list[dict] = None, intent: str = None) -> dict:
     """
-    Generate a persona-voiced answer grounded in source chunks.
+    Generates a classical persona response constrained to retrieved context documents.
 
     Args:
-        query: The original user question.
-        retrieved_chunks: Chunks from vector store search.
-        system_prompt: The complete persona ruleset.
-        conversation_history: Previous turns.
-        intent: The intent from the Router (e.g. 'casual', 'terminology').
+        query: The raw query sent by the user.
+        retrieved_chunks: Document blocks fetched from the active database.
+        system_prompt: Core character rules, directives, and stylistic mandates.
+        conversation_history: List of prior turns.
+        intent: Classified intent key from Router.
     """
     is_casual = (intent == "casual") or (not retrieved_chunks and not intent)
     sources_text = _format_chunks_for_prompt(retrieved_chunks) if retrieved_chunks else ""
 
     # ── Input Length Guard ────────────────────────────────
-    # Conservative token estimate: 4 chars ≈ 1 token (tuned for mixed Arabic/English)
+    # Measures prompt length. Converts to token approximation (mixed lang default = ~4 chars/token).
     full_prompt_len = len(query) + len(sources_text) + len(system_prompt)
     if conversation_history:
         full_prompt_len += sum(len(t["content"]) for t in conversation_history)
@@ -242,18 +269,17 @@ def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str
     try:
         result = _generate_openrouter(query, sources_text, system_prompt, conversation_history, is_casual)
 
-        # ── Normalize field aliases from different model outputs ──
-        # Some models return "answer" or "response" instead of "answer_text"
+        # ── Format Normalization & Verification Shims ─────────
+        # Intercept common alternative keys returned by non-standardized model outputs
         if "answer" in result and not result.get("answer_text"):
             result["answer_text"] = result["answer"]
         if "response" in result and not result.get("answer_text"):
             result["answer_text"] = result["response"]
 
-        # If the model answered but forgot to set the boolean, infer it
         if result.get("answer_text") and not result.get("can_answer"):
             result["can_answer"] = True
 
-        # Guarantee all required fields are present
+        # Enforce existence of essential interface fields
         result.setdefault("can_answer", False)
         result.setdefault("answer_mode", "elaborated")
         result.setdefault("quote_primary", "")
@@ -275,11 +301,13 @@ def generate_answer(query: str, retrieved_chunks: list[dict], system_prompt: str
 
 def verify_answer(retrieved_chunks: list[dict], generated_answer: dict) -> bool:
     """
-    Verification pass: checks whether the generated answer is grounded in sources
-    and free of anachronisms (post-505 AH references).
+    Post-Generation Grounding and Verification guard.
+    Uses the fast, lightweight ROUTER_MODEL to audit generated text against source documents.
+    Blocks hallucinations, fabricated quotes, and anachronisms (e.g. references after 505 AH).
 
-    Uses the fast ROUTER_MODEL to minimize pipeline latency.
-    Returns True (grounded) or False (hallucination detected).
+    Returns:
+        True: Response is fully grounded and chronologically valid.
+        False: Hallucination or chronological boundary violation detected.
     """
     if not config.ENABLE_VERIFICATION:
         return True
@@ -327,7 +355,9 @@ def verify_answer(retrieved_chunks: list[dict], generated_answer: dict) -> bool:
 
 
 def _empty_response() -> dict:
-    """Return a safe blank response dict when generation fails."""
+    """
+    Constructs a safe, standard blank response dictionary if LLM pipeline operations fail.
+    """
     return {
         "can_answer": False,
         "answer_text": "I cannot address this matter.",
@@ -335,3 +365,4 @@ def _empty_response() -> dict:
         "follow_up": "",
         "closing": "",
     }
+
